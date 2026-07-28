@@ -1,58 +1,77 @@
 [build-system]
-requires = ["setuptools>=65.0", "wheel"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "helix-notifications"
-version = "1.0.0"
-description = "Production-ready notification system for multi-channel delivery"
+version = "0.1.0"
+description = "Local-first async notification delivery for Python applications"
 readme = "README.md"
-requires-python = ">=3.9"
-license = {text = "Apache-2.0"}
+requires-python = ">=3.10"
+license = "BUSL-1.1"
+license-files = ["LICENSE"]
 authors = [
-    {name = "Helix Collective", email = "dev@helixcollective.io"}
+    { name = "Helix Collective", email = "dev@helixcollective.io" },
 ]
-keywords = ["notifications", "email", "webhooks", "alerts", "messaging"]
+keywords = ["notifications", "email", "smtp", "webhooks", "asyncio"]
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Typing :: Typed",
 ]
-
 dependencies = [
-    "pydantic>=2.0",
-    "httpx>=0.24.0",
+    "httpx>=0.27,<1",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0",
-    "pytest-asyncio>=0.21.0",
-    "black>=23.0",
-    "ruff>=0.1.0",
-    "mypy>=1.0",
+    "build>=1.2,<2",
+    "mypy>=1.11,<2",
+    "pytest>=8.3,<10",
+    "pytest-asyncio>=0.24,<2",
+    "pytest-cov>=6,<8",
+    "ruff>=0.9,<1",
+    "twine>=6,<7",
 ]
 
 [project.urls]
 Homepage = "https://github.com/Deathcharge/helix-notifications"
-Documentation = "https://helix-notifications.readthedocs.io"
 Repository = "https://github.com/Deathcharge/helix-notifications"
 Issues = "https://github.com/Deathcharge/helix-notifications/issues"
 
-[tool.black]
-line-length = 100
-target-version = ['py39', 'py310', 'py311']
+[tool.setuptools.packages.find]
+include = ["helix_notifications*"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["ASYNC", "B", "E", "F", "I", "UP"]
 
 [tool.mypy]
-python_version = "3.9"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = false
+python_version = "3.10"
+packages = ["helix_notifications"]
+strict = true
+warn_unreachable = true
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["helix_notifications"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = true

@@ -52,6 +52,7 @@ celerybeat-schedule
 celerybeat.pid
 *.sage.py
 venv/
+.venv/
 ENV/
 env.bak/
 venv.bak/
@@ -60,6 +61,7 @@ venv.bak/
 .ropeproject
 /site
 .mypy_cache/
+.ruff_cache/
 .dmypy.json
 dmypy.json
 .pyre/

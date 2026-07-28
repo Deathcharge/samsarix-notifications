@@ -1,27 +1,48 @@
-"""
-Helix Notifications Engine
+"""Small, local-first notification delivery primitives for Python applications."""
 
-A comprehensive, production-ready notification system supporting multiple channels:
-- Email notifications
-- Webhook notifications  
-- Alert management
-- Delivery tracking
-- Retry logic
-- Rate limiting
-"""
+from .alert_system import Alert, AlertSeverity, AlertSystem
+from .email_service import EmailAttachment, EmailService, EmailTemplate, SMTPConfig
+from .errors import (
+    ConfigurationError,
+    DeliveryError,
+    NotificationError,
+    NotificationValidationError,
+)
+from .models import (
+    DeliveryResult,
+    DeliveryStatus,
+    NotificationChannel,
+    NotificationPayload,
+    RetryPolicy,
+    TransportResult,
+)
+from .notification_service import NotificationService, NotificationTransport
+from .webhook_router import WebhookPolicy, WebhookRoute, WebhookRouter
 
-__version__ = "1.0.0"
+__version__ = "0.1.0"
 __author__ = "Helix Collective"
-__license__ = "Apache 2.0"
-
-from .notification_service import NotificationService
-from .email_service import EmailService
-from .alert_system import AlertSystem
-from .webhook_router import WebhookRouter
 
 __all__ = [
-    "NotificationService",
-    "EmailService", 
+    "Alert",
+    "AlertSeverity",
     "AlertSystem",
-    "WebhookRouter"
+    "ConfigurationError",
+    "DeliveryError",
+    "DeliveryResult",
+    "DeliveryStatus",
+    "EmailAttachment",
+    "EmailService",
+    "EmailTemplate",
+    "NotificationChannel",
+    "NotificationError",
+    "NotificationPayload",
+    "NotificationService",
+    "NotificationTransport",
+    "NotificationValidationError",
+    "RetryPolicy",
+    "SMTPConfig",
+    "TransportResult",
+    "WebhookPolicy",
+    "WebhookRoute",
+    "WebhookRouter",
 ]
