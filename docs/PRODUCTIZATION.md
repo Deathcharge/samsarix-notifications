@@ -122,17 +122,18 @@ Baseline revision: `1a4acb0abac0e66ab821cfae0bd1978e2b05ab05` on clean `main`, m
 | Twine metadata validation | Passed for both artifacts. |
 | Non-editable wheel smoke import | Passed outside the repository. |
 | Workflow validation | Both GitHub Actions workflows passed `actionlint` 1.7.12. |
+| Hosted CI | Passed on Python 3.10, 3.11, 3.12, 3.13, and 3.14 in pull request #2. |
 | Runtime dependency audit | No known vulnerabilities reported; the local package is not yet on PyPI. |
 
 ## Completed work
 
 The repository now has real SMTP and webhook transports; explicit results and stable error codes; bounded retry, timeout, concurrency, batch, history, idempotency, attachment, payload, and alert behavior; and truthful custom-channel extensibility. It also has deterministic tests, a localhost end-to-end example, supported-version CI, modern single-source packaging, release documentation, and a repository-wide security review. There is no locally actionable P0 or reportable security finding in the completed review.
 
-**Disposition:** release candidate, subject to the registry and hosted-CI gates below. The package is independently useful now; no hosted Samsarix service or adjacent repository is required.
+**Disposition:** release candidate, subject to the registry gate below. The package is independently useful now; no hosted Samsarix service or adjacent repository is required.
 
 ## Deferred and externally blocked work
 
-- **Owner/publication:** register the `samsarix-notifications` pending publisher on PyPI for repository `Deathcharge/samsarix-notifications`, workflow `release.yml`, and environment `pypi`; configure that GitHub environment with required owner approval; publish only after hosted CI succeeds. No external package was published.
+- **Owner/publication:** register the `samsarix-notifications` pending publisher on PyPI for repository `Deathcharge/samsarix-notifications`, workflow `release.yml`, and environment `pypi`. The protected GitHub environment and its required owner approval are configured, and hosted CI passed. No external package was published.
 - **Credentials/providers:** live SMTP and production webhook smoke tests require owner-supplied endpoints and would create external side effects. Local fakes and a localhost end-to-end receiver cover the interfaces without cost.
 - **Portfolio:** no changes to another Samsarix repository are required.
 
