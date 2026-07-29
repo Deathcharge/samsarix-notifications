@@ -1,6 +1,8 @@
+# SPDX-License-Identifier: MPL-2.0
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
@@ -16,8 +18,10 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -26,7 +30,7 @@ jobs:
       - run: python -m ruff format --check .
       - run: python -m ruff check .
       - run: python -m mypy
-      - run: python -m pytest --cov=helix_notifications --cov-report=term-missing
+      - run: python -m pytest --cov=samsarix_notifications --cov-report=term-missing
       - run: python examples/local_webhook.py
       - run: python -m build
       - run: python -m twine check dist/*
@@ -34,6 +38,6 @@ jobs:
         shell: bash
         run: |
           python -m venv "$RUNNER_TEMP/wheel-smoke"
-          "$RUNNER_TEMP/wheel-smoke/bin/python" -m pip install --no-deps dist/*.whl
+          "$RUNNER_TEMP/wheel-smoke/bin/python" -m pip install dist/*.whl
           cd "$RUNNER_TEMP"
-          "$RUNNER_TEMP/wheel-smoke/bin/python" -c "import helix_notifications as h; assert h.__version__ == '0.1.0'; print(h.__version__)"
+          "$RUNNER_TEMP/wheel-smoke/bin/python" -c "import samsarix_notifications as s; assert s.__version__ == '0.1.0'; print(s.__version__)"
