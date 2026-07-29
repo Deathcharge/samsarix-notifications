@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+title: "Samsarix Notifications"
+type: software
+authors:
+  - name: "Samsarix LLC"
+    email: "contact@samsarix.com"
+abstract: "Local-first async SMTP and webhook notification delivery for Python applications."
+version: 0.1.0
+repository-code: "https://github.com/Deathcharge/samsarix-notifications"
+license: MPL-2.0
+keywords:
+  - notifications
+  - email
+  - SMTP
+  - webhooks
+  - asyncio
