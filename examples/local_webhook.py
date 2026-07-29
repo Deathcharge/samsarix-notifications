@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MPL-2.0
 """Run a credential-free notification journey against a localhost receiver."""
 
 from __future__ import annotations
@@ -8,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 from typing import ClassVar
 
-from helix_notifications import (
+from samsarix_notifications import (
     NotificationPayload,
     NotificationService,
     WebhookPolicy,

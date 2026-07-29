@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MPL-2.0
 """Bounded process-local alert state."""
 
 from __future__ import annotations

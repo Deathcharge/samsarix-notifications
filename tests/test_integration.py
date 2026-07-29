@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MPL-2.0
 from __future__ import annotations
 
 import json
@@ -7,7 +8,7 @@ from typing import ClassVar
 
 import pytest
 
-from helix_notifications import (
+from samsarix_notifications import (
     NotificationPayload,
     NotificationService,
     WebhookPolicy,

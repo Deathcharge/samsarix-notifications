@@ -6,17 +6,17 @@ Last updated: 2026-07-28
 
 The repository began as an async Python notification engine with `NotificationService`, `EmailService`, `WebhookRouter`, and `AlertSystem`. The April 2026 implementation advertised email, webhooks, Discord, Slack, SMS, push, retry logic, rate limiting, delivery tracking, templates, signatures, and idempotency, but every transport returned `True` without I/O. There were no tests, examples, CI workflows, release tags, or published PyPI package. A later ecosystem-wide documentation rewrite replaced useful package documentation with links to files and automation that did not exist.
 
-The repository is independently useful as an embedded Python library. It is not evidence for a hosted service, frontend, database, AI feature, or Helix Unified dependency.
+The repository is independently useful as an embedded Python library. It is not evidence for a hosted service, frontend, database, AI feature, or private platform dependency. Before its first release, the owner moved the product and company identity from Helix to Samsarix; the distribution and import namespace were renamed at the same time to avoid shipping a permanent compatibility alias.
 
 ## Chosen product
 
-**Product:** a local-first async Python notification-delivery library with built-in SMTP email and secure JSON webhooks, an explicit result/error contract, bounded retries and concurrency, process-local idempotency and history, and a small custom-transport protocol.
+**Product:** Samsarix Notifications, a local-first async Python notification-delivery library from Samsarix LLC with built-in SMTP email and secure JSON webhooks, an explicit result/error contract, bounded retries and concurrency, process-local idempotency and history, and a small custom-transport protocol.
 
 **Target user:** a Python application developer who needs one dependable boundary for transactional email, operational webhooks, or an application-specific transport without operating another notification platform.
 
 **Primary journey:** configure a webhook or SMTP transport, construct a validated `NotificationPayload`, send it through `NotificationService`, and receive a truthful `DeliveryResult` covering success, retry, timeout, configuration failure, or provider rejection.
 
-**Independent reason to exist:** unlike Apprise's broad provider catalog or hosted systems such as Courier and Novu, this package is intentionally small, source-available, locally operated, typed, and focused on safe transport primitives that embed into an existing Python process. It has no private Helix runtime dependency.
+**Independent reason to exist:** unlike Apprise's broad provider catalog or hosted systems such as Courier and Novu, this package is intentionally small, open source, locally operated, typed, and focused on safe transport primitives that embed into an existing Python process. It has no private Samsarix runtime dependency.
 
 **Deliberate non-goals:** hosted workflow design, subscriber profiles/preferences, durable queues, cross-process idempotency, provider dashboards, SMS/push provider implementations, analytics, billing, AI content generation, authentication, a database, and a frontend.
 
@@ -38,7 +38,7 @@ The repository is independently useful as an embedded Python library. It is not 
 - The host application performs business authorization and consent/preference checks before calling the library.
 - Operators provide valid SMTP credentials and external endpoints; tests use fakes or localhost only.
 - Provider acknowledgement is the strongest portable synchronous delivery signal.
-- The repository owner will decide license wording and publication credentials.
+- Samsarix LLC has authority to rebrand and license the repository; publication credentials remain owner-controlled.
 
 ## Baseline command results
 
@@ -63,7 +63,7 @@ Baseline revision: `1a4acb0abac0e66ab821cfae0bd1978e2b05ab05` on clean `main`, m
 - All advertised transports falsely returned success without performing delivery.
 - The documented requirements installation failed and installed unrelated platform dependencies.
 - The README advertised nonexistent examples, documents, CI, coverage, and a production-ready state.
-- Package metadata declared Apache-2.0 while `LICENSE` contains Business Source License 1.1. The license parameters name a different “Licensed Work”; owner confirmation remains a release gate.
+- Package metadata declared Apache-2.0 while `LICENSE` contained Business Source License 1.1 and named a different “Licensed Work”; owner confirmation was a release gate until the Samsarix/MPL-2.0 transition resolved it.
 
 ### P1
 
@@ -107,34 +107,34 @@ Baseline revision: `1a4acb0abac0e66ab821cfae0bd1978e2b05ab05` on clean `main`, m
 - Webhook private-address, redirect, payload-limit, timeout, and signature behavior is covered.
 - README commands and public API examples match the built artifact.
 - No locally actionable P0 remains.
-- The owner confirms license parameters before public publication.
+- Package metadata, source notices, and built artifacts consistently identify MPL-2.0 and Samsarix LLC.
 
 ## Final verification
 
 | Gate | Result |
 | --- | --- |
 | Ruff format and lint | Passed. |
-| Strict mypy over the library | Passed. |
-| Unit and localhost integration tests | 68 passed on Python 3.13.14. |
+| Strict mypy over the library and tests | Passed: 15 files. |
+| Unit and localhost integration tests | 69 passed on Python 3.13.14. |
 | Branch-aware coverage | 96.95%, above the 90% gate. |
 | Local webhook example | Passed without credentials or external network access. |
 | Wheel and source build | Passed from `pyproject.toml`. |
 | Twine metadata validation | Passed for both artifacts. |
 | Non-editable wheel smoke import | Passed outside the repository. |
+| Workflow validation | Both GitHub Actions workflows passed `actionlint` 1.7.12. |
 | Runtime dependency audit | No known vulnerabilities reported; the local package is not yet on PyPI. |
 
 ## Completed work
 
 The repository now has real SMTP and webhook transports; explicit results and stable error codes; bounded retry, timeout, concurrency, batch, history, idempotency, attachment, payload, and alert behavior; and truthful custom-channel extensibility. It also has deterministic tests, a localhost end-to-end example, supported-version CI, modern single-source packaging, release documentation, and a repository-wide security review. There is no locally actionable P0 or reportable security finding in the completed review.
 
-**Disposition:** release candidate, subject to the owner-controlled license and registry gates below. The package is independently useful now; no hosted Helix service or adjacent repository is required.
+**Disposition:** release candidate, subject to the registry and hosted-CI gates below. The package is independently useful now; no hosted Samsarix service or adjacent repository is required.
 
 ## Deferred and externally blocked work
 
-- **Owner/legal:** confirm that `LICENSE` should identify `helix-notifications` as the Licensed Work and decide whether `LICENSE.PROPRIETARY` remains applicable. Verify the stated change date and contact details. No license text was changed.
-- **Owner/publication:** choose a package registry owner, protect the package name, configure trusted publishing, and publish only after the license gate. No external account or package was created.
+- **Owner/publication:** register the `samsarix-notifications` pending publisher on PyPI for repository `Deathcharge/samsarix-notifications`, workflow `release.yml`, and environment `pypi`; configure that GitHub environment with required owner approval; publish only after hosted CI succeeds. No external package was published.
 - **Credentials/providers:** live SMTP and production webhook smoke tests require owner-supplied endpoints and would create external side effects. Local fakes and a localhost end-to-end receiver cover the interfaces without cost.
-- **Portfolio:** no changes to `helix-unified` or another repository are required.
+- **Portfolio:** no changes to another Samsarix repository are required.
 
 ## Known risks
 
@@ -146,6 +146,6 @@ The repository now has real SMTP and webhook transports; explicit results and st
 
 ## Distribution and sustainability
 
-The simplest distribution path is a pure-Python wheel and source distribution built from `pyproject.toml`, published to PyPI through owner-configured trusted publishing after the legal gate. The package itself needs no hosted infrastructure. Sustainability can follow the existing source-available/commercial-licensing intent through paid support, integration work, or a separately licensed commercial offering; no subscription economics or demand are assumed.
+The simplest distribution path is a pure-Python wheel and source distribution built from `pyproject.toml`, published to PyPI through the protected GitHub Release workflow after the owner configures Trusted Publishing. The package itself needs no hosted infrastructure. MPL-2.0 keeps distributed modifications to covered files open while allowing broad embedding; sustainability can come from paid support, integration work, or a separately operated hosted offering. No subscription economics or validated demand are assumed.
 
 Runtime cost is provider-driven. With `N` requested notifications and retry cap `R`, provider attempts are bounded by `N * (1 + R)`. Default `R=3` and concurrency is 10. Tests make no paid provider calls.

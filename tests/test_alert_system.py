@@ -1,8 +1,9 @@
+# SPDX-License-Identifier: MPL-2.0
 from __future__ import annotations
 
 import pytest
 
-from helix_notifications import (
+from samsarix_notifications import (
     Alert,
     AlertSeverity,
     AlertSystem,
@@ -44,13 +45,20 @@ def test_alert_validation() -> None:
     with pytest.raises(NotificationValidationError):
         Alert("", "title", "description", AlertSeverity.HIGH, "source")
     with pytest.raises(NotificationValidationError):
-        Alert("id", "title", "description", "unknown", "source")  # type: ignore[arg-type]
+        Alert("id", "title", "description", "unknown", "source")
     with pytest.raises(NotificationValidationError):
         AlertSystem(max_alerts=0)
     with pytest.raises(NotificationValidationError):
         Alert("id", "x" * 10_001, "description", AlertSeverity.HIGH, "source")
     with pytest.raises(NotificationValidationError):
-        Alert("id", "title", "description", AlertSeverity.HIGH, "source", metadata="bad")
+        Alert(
+            "id",
+            "title",
+            "description",
+            AlertSeverity.HIGH,
+            "source",
+            metadata="bad",  # type: ignore[arg-type]
+        )
 
 
 @pytest.mark.asyncio

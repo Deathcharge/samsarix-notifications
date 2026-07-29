@@ -3,17 +3,20 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "helix-notifications"
+name = "samsarix-notifications"
 version = "0.1.0"
 description = "Local-first async notification delivery for Python applications"
 readme = "README.md"
 requires-python = ">=3.10"
-license = "BUSL-1.1"
-license-files = ["LICENSE"]
+license = "MPL-2.0"
+license-files = ["LICENSE", "NOTICE"]
 authors = [
-    { name = "Helix Collective", email = "dev@helixcollective.io" },
+    { name = "Samsarix LLC", email = "contact@samsarix.com" },
 ]
-keywords = ["notifications", "email", "smtp", "webhooks", "asyncio"]
+maintainers = [
+    { name = "Samsarix LLC", email = "support@samsarix.com" },
+]
+keywords = ["samsarix", "notifications", "email", "smtp", "webhooks", "asyncio"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -42,12 +45,13 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Deathcharge/helix-notifications"
-Repository = "https://github.com/Deathcharge/helix-notifications"
-Issues = "https://github.com/Deathcharge/helix-notifications/issues"
+Homepage = "https://github.com/Deathcharge/samsarix-notifications"
+Repository = "https://github.com/Deathcharge/samsarix-notifications"
+Issues = "https://github.com/Deathcharge/samsarix-notifications/issues"
+Security = "https://github.com/Deathcharge/samsarix-notifications/security/advisories/new"
 
 [tool.setuptools.packages.find]
-include = ["helix_notifications*"]
+include = ["samsarix_notifications*"]
 
 [tool.ruff]
 line-length = 100
@@ -58,7 +62,7 @@ select = ["ASYNC", "B", "E", "F", "I", "UP"]
 
 [tool.mypy]
 python_version = "3.10"
-packages = ["helix_notifications"]
+files = ["samsarix_notifications", "tests"]
 strict = true
 warn_unreachable = true
 
@@ -69,7 +73,7 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 branch = true
-source = ["helix_notifications"]
+source = ["samsarix_notifications"]
 
 [tool.coverage.report]
 fail_under = 90

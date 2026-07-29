@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MPL-2.0
 from __future__ import annotations
 
 import asyncio
@@ -5,7 +6,7 @@ from collections.abc import Sequence
 
 import pytest
 
-from helix_notifications import (
+from samsarix_notifications import (
     DeliveryError,
     NotificationPayload,
     NotificationService,

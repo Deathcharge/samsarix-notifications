@@ -6,11 +6,11 @@ The unreleased `0.1.x` line is the only version currently receiving security fix
 
 ## Reporting
 
-Please report a suspected vulnerability through GitHub's private security-advisory workflow for this repository. Do not open a public issue containing credentials, private notification content, exploit details, or production endpoints. Include the affected version or commit, the smallest reproducible input, impact, and any relevant deployment assumptions.
+Please report a suspected vulnerability through GitHub's private security-advisory workflow for this repository or email [support@samsarix.com](mailto:support@samsarix.com) with a subject beginning `[SECURITY]`. Do not open a public issue containing credentials, private notification content, exploit details, or production endpoints. Include the affected version or commit, the smallest reproducible input, impact, and any relevant deployment assumptions.
 
 ## Trust boundaries and invariants
 
-Helix Notifications is an embedded library, not an authorization service. The host application decides who may send a notification and what content they may supply. The library is responsible for:
+Samsarix Notifications is an embedded library, not an authorization service. The host application decides who may send a notification and what content they may supply. The library is responsible for:
 
 - truthful acknowledgement of transport acceptance;
 - bounded retries, timeouts, concurrency, payloads, attachments, caches, and history;

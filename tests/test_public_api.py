@@ -1,10 +1,11 @@
+# SPDX-License-Identifier: MPL-2.0
 from __future__ import annotations
 
-import helix_notifications
+import samsarix_notifications
 
 
 def test_public_package_shape() -> None:
-    assert helix_notifications.__version__ == "0.1.0"
+    assert samsarix_notifications.__version__ == "0.1.0"
     expected = {
         "Alert",
         "AlertSeverity",
@@ -29,4 +30,4 @@ def test_public_package_shape() -> None:
         "WebhookRoute",
         "WebhookRouter",
     }
-    assert set(helix_notifications.__all__) == expected
+    assert set(samsarix_notifications.__all__) == expected

@@ -1,8 +1,8 @@
-# Helix Notifications
+# Samsarix Notifications
 
-Helix Notifications is a small, local-first Python library for delivering email and JSON webhooks from an existing application. It gives application developers one async dispatch interface, explicit delivery results, bounded retries and concurrency, process-local idempotency, safe webhook destination defaults, and injectable transports for testing or additional channels.
+Samsarix Notifications is a small, local-first Python library from Samsarix LLC for delivering email and JSON webhooks from an existing application. It gives application developers one async dispatch interface, explicit delivery results, bounded retries and concurrency, process-local idempotency, safe webhook destination defaults, and injectable transports for testing or additional channels.
 
-It is not a hosted notification platform, durable queue, user-preference service, or Helix Unified client. Version `0.1.0` is a release candidate intended for real evaluation; publishing is still gated on owner confirmation of the repository's license parameters.
+It is not a hosted notification platform, durable queue, or user-preference service. Version `0.1.0` is a release candidate intended for real evaluation and is not yet published on PyPI.
 
 ## Who it is for
 
@@ -16,8 +16,8 @@ Use this package when a Python service or automation needs a dependable embedded
 Install a source checkout for evaluation:
 
 ```bash
-git clone https://github.com/Deathcharge/helix-notifications.git
-cd helix-notifications
+git clone https://github.com/Deathcharge/samsarix-notifications.git
+cd samsarix-notifications
 python -m venv .venv
 ```
 
@@ -37,7 +37,7 @@ Then install the package:
 python -m pip install -e .
 ```
 
-The package has one runtime dependency, HTTPX. SMTP delivery uses Python's standard library. The project is not currently published on PyPI, so `pip install helix-notifications` is not yet an advertised installation path.
+The package has one runtime dependency, HTTPX. SMTP delivery uses Python's standard library. The project is not currently published on PyPI, so `pip install samsarix-notifications` is not yet an advertised installation path.
 
 ## Five-minute webhook journey
 
@@ -46,7 +46,7 @@ Webhook delivery requires an exact host allowlist and permits only public HTTPS 
 ```python
 import asyncio
 
-from helix_notifications import (
+from samsarix_notifications import (
     NotificationChannel,
     NotificationPayload,
     NotificationService,
@@ -91,7 +91,7 @@ That example explicitly opts into private HTTP destinations for local developmen
 import asyncio
 import os
 
-from helix_notifications import EmailService, SMTPConfig
+from samsarix_notifications import EmailService, SMTPConfig
 
 
 async def main() -> None:
@@ -133,7 +133,7 @@ asyncio.run(main())
 Register a custom channel by implementing one async method:
 
 ```python
-from helix_notifications import NotificationPayload, TransportResult
+from samsarix_notifications import NotificationPayload, TransportResult
 
 
 class AuditTransport:
@@ -156,7 +156,7 @@ The default webhook policy:
 - does not follow redirects;
 - ignores ambient proxy environment variables;
 - applies payload, timeout, and connection limits;
-- can HMAC-sign registered routes with `X-Helix-Signature: sha256=...`.
+- can HMAC-sign registered routes with `X-Samsarix-Signature: sha256=...`.
 
 DNS validation and the later network connection are separate operations, so DNS rebinding cannot be eliminated completely by an application-layer library. Exact allowlists reduce the attacker-controlled-host case; egress firewall rules remain the strongest control for high-trust deployments. See [SECURITY.md](SECURITY.md) for trust boundaries and reporting.
 
@@ -168,7 +168,7 @@ DNS validation and the later network connection are separate operations, so DNS 
 - `WebhookRouter` supports direct notifications and named event routes over HTTPX.
 - `AlertSystem` is a bounded process-local active-alert registry. It intentionally does not imply durable alert persistence or escalation automation.
 
-Email and webhooks are the only built-in transports. The legacy Discord, Slack, SMS, and push enum values remain as custom-transport names, not simulated features. There is no dependency on Helix Unified or another private service.
+Email and webhooks are the only built-in transports. The reserved Discord, Slack, SMS, and push enum values remain custom-transport names, not simulated features. There is no dependency on another Samsarix repository or private service.
 
 ## Development and verification
 
@@ -184,7 +184,7 @@ Run the same checks as CI:
 python -m ruff format --check .
 python -m ruff check .
 python -m mypy
-python -m pytest --cov=helix_notifications --cov-report=term-missing
+python -m pytest --cov=samsarix_notifications --cov-report=term-missing
 python -m build
 python -m twine check dist/*
 ```
@@ -203,8 +203,14 @@ provider attempts <= requested notifications * (1 + configured max_retries)
 
 The defaults cap concurrent deliveries at 10, batch inputs at 1,000, and total attempts at four per notification. A durable queue, distributed rate limiter, provider receipt polling, subscriber preferences, and billing controls remain outside this package's scope.
 
-## Release and license status
+## Release, support, and license
 
-Build artifacts with `python -m build`; publication is an owner-controlled step and is not automated from local development. The checked-in `LICENSE` is Business Source License 1.1 with a change date of June 16, 2027. Its parameters currently name “Helix Licensing System,” not this package, while `LICENSE.PROPRIETARY` also remains in the repository. The owner must confirm the intended licensed-work name and whether the secondary file applies before the first public package release. No legal interpretation or license change is made here.
+Build artifacts with `python -m build`. Publishing is isolated in `.github/workflows/release.yml` and occurs only when a GitHub Release is published, after the `pypi` environment and PyPI Trusted Publisher are configured. The workflow uses short-lived OIDC credentials rather than a stored package token and generates PyPI attestations through the official publishing action.
+
+The project is licensed under the [Mozilla Public License 2.0](LICENSE), with copyright and contact information in [NOTICE](NOTICE). MPL-2.0 is a file-level copyleft license: distributed modifications to covered source files remain available under MPL-2.0, while a larger proprietary application may use the library without being relicensed as a whole. License and copyright notices must be preserved. This is a practical explanation, not legal advice.
+
+For general or licensing inquiries, email [contact@samsarix.com](mailto:contact@samsarix.com). For product support or private security reports, email [support@samsarix.com](mailto:support@samsarix.com).
+
+GitHub-compatible citation metadata is provided in [CITATION.cff](CITATION.cff). Redistributions should retain [LICENSE](LICENSE), [NOTICE](NOTICE), and the SPDX notices attached to source files.
 
 See [docs/PRODUCTIZATION.md](docs/PRODUCTIZATION.md) for the assessment, acceptance criteria, completed work, and remaining gates, and [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow.

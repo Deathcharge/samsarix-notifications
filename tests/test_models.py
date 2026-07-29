@@ -1,10 +1,15 @@
+# SPDX-License-Identifier: MPL-2.0
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
 import pytest
 
-from helix_notifications import NotificationPayload, NotificationValidationError, RetryPolicy
+from samsarix_notifications import (
+    NotificationPayload,
+    NotificationValidationError,
+    RetryPolicy,
+)
 
 
 def base_payload(**overrides: object) -> NotificationPayload:

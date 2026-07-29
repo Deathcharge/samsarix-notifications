@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MPL-2.0
 """Public data models for notification delivery."""
 
 from __future__ import annotations

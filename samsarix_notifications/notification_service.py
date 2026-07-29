@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MPL-2.0
 """Async notification dispatcher with retries, idempotency, and tracking."""
 
 from __future__ import annotations

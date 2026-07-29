@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MPL-2.0
 from __future__ import annotations
 
 import smtplib
@@ -6,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from helix_notifications import (
+from samsarix_notifications import (
     ConfigurationError,
     DeliveryError,
     EmailAttachment,
@@ -66,7 +67,7 @@ async def test_smtp_send_builds_message_and_negotiates_tls() -> None:
         factory_args.append((host, port, timeout, use_ssl))
         return fake
 
-    email = EmailService(config(), smtp_factory=factory)  # type: ignore[arg-type]
+    email = EmailService(config(), smtp_factory=factory)
     result = await email.send(
         "recipient@example.com",
         "Subject",

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MPL-2.0
 """Small, local-first notification delivery primitives for Python applications."""
 
 from .alert_system import Alert, AlertSeverity, AlertSystem
@@ -20,7 +21,7 @@ from .notification_service import NotificationService, NotificationTransport
 from .webhook_router import WebhookPolicy, WebhookRoute, WebhookRouter
 
 __version__ = "0.1.0"
-__author__ = "Helix Collective"
+__author__ = "Samsarix LLC"
 
 __all__ = [
     "Alert",

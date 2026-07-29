@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MPL-2.0
 from __future__ import annotations
 
 import hashlib
@@ -8,7 +9,7 @@ from collections.abc import Sequence
 import httpx
 import pytest
 
-from helix_notifications import (
+from samsarix_notifications import (
     ConfigurationError,
     DeliveryError,
     NotificationPayload,
@@ -53,7 +54,9 @@ async def test_direct_notification_sends_json_without_redirects() -> None:
     assert result.provider_id == "provider-123"
     assert len(requests) == 1
     request = requests[0]
-    assert request.headers["X-Helix-Event"] == "build.finished"
+    assert request.headers["User-Agent"] == "samsarix-notifications/0.1"
+    assert request.headers["X-Samsarix-Event"] == "build.finished"
+    assert "X-Helix-Event" not in request.headers
     assert json.loads(request.content) == {
         "id": "notification-1",
         "event": "build.finished",
@@ -82,7 +85,7 @@ async def test_registered_route_signs_exact_body() -> None:
 
     assert result.provider_status == "204"
     expected = hmac.new(secret, requests[0].content, hashlib.sha256).hexdigest()
-    assert requests[0].headers["X-Helix-Signature"] == f"sha256={expected}"
+    assert requests[0].headers["X-Samsarix-Signature"] == f"sha256={expected}"
 
 
 @pytest.mark.asyncio
@@ -107,9 +110,9 @@ async def test_private_destination_is_rejected_before_request() -> None:
             await router.route("event", {})
         assert raised.value.code == "unknown_webhook_route"
         router.register_route("event", "https://internal.example/hook")
-        with pytest.raises(DeliveryError) as raised:
+        with pytest.raises(DeliveryError) as delivery_error:
             await router.route("event", {})
-    assert raised.value.code == "webhook_private_destination"
+    assert delivery_error.value.code == "webhook_private_destination"
     assert not called
 
 

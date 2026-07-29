@@ -1,4 +1,5 @@
-"""Typed errors exposed by :mod:`helix_notifications`."""
+# SPDX-License-Identifier: MPL-2.0
+"""Typed errors exposed by :mod:`samsarix_notifications`."""
 
 from __future__ import annotations
 

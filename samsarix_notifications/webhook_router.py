@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MPL-2.0
 """HTTP webhook delivery with destination policy and optional HMAC signing."""
 
 from __future__ import annotations
@@ -176,12 +177,12 @@ class WebhookRouter:
         await self._validate_destination(route.destination)
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "helix-notifications/0.1",
-            "X-Helix-Event": event_type,
+            "User-Agent": "samsarix-notifications/0.1",
+            "X-Samsarix-Event": event_type,
         }
         if route.secret is not None:
             digest = hmac.new(route.secret, body, hashlib.sha256).hexdigest()
-            headers["X-Helix-Signature"] = f"sha256={digest}"
+            headers["X-Samsarix-Signature"] = f"sha256={digest}"
         try:
             async with self._client.stream(
                 "POST",

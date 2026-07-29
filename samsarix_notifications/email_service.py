@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MPL-2.0
 """SMTP email transport with safe templates and bounded attachments."""
 
 from __future__ import annotations
@@ -123,7 +124,9 @@ class EmailTemplate:
     html: str | None = None
 
 
-SMTPFactory = Callable[[str, int, float, bool], smtplib.SMTP]
+# The factory is an injection seam for tests and alternate SMTP-compatible
+# clients. Runtime method behavior is validated at the call boundary.
+SMTPFactory = Callable[[str, int, float, bool], Any]
 
 
 class EmailService:
@@ -310,7 +313,7 @@ class EmailService:
                 "SMTP connection failed", code="smtp_connection_error", retryable=True
             ) from exc
 
-    def _create_smtp_client(self) -> smtplib.SMTP:
+    def _create_smtp_client(self) -> Any:
         assert self.config is not None
         if self._smtp_factory is not None:
             return self._smtp_factory(

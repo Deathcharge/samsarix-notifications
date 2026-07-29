@@ -1,12 +1,12 @@
-# Contributing to Helix Notifications
+# Contributing to Samsarix Notifications
 
-Thanks for helping improve the package. Contributions should preserve its narrow purpose: a dependable embedded Python delivery boundary for email, webhooks, and custom transports. Hosted infrastructure, databases, user management, and unrelated Helix platform code are out of scope unless the product definition changes explicitly.
+Thanks for helping improve the package. Contributions should preserve its narrow purpose: a dependable embedded Python delivery boundary for email, webhooks, and custom transports. Hosted infrastructure, databases, user management, and unrelated platform code are out of scope unless the product definition changes explicitly.
 
 ## Setup
 
 ```bash
-git clone https://github.com/Deathcharge/helix-notifications.git
-cd helix-notifications
+git clone https://github.com/Deathcharge/samsarix-notifications.git
+cd samsarix-notifications
 python -m venv .venv
 ```
 
@@ -22,7 +22,7 @@ python -m pip install -e ".[dev]"
 python -m ruff format --check .
 python -m ruff check .
 python -m mypy
-python -m pytest --cov=helix_notifications --cov-report=term-missing
+python -m pytest --cov=samsarix_notifications --cov-report=term-missing
 python -m build
 python -m twine check dist/*
 ```
@@ -37,4 +37,4 @@ Treat webhook destination validation, redirect behavior, SMTP TLS/authentication
 
 Keep changes small enough to review, explain the user-visible outcome, and include the exact commands you ran. Do not claim a provider integration works without an interface-level test. Use conventional commit prefixes such as `feat:`, `fix:`, `docs:`, `test:`, and `chore:` when practical.
 
-The default branch is not a publication trigger. Package publishing, licensing decisions, credentials, and production deployments remain owner-controlled.
+The default branch is not a publication trigger. Publishing a GitHub Release invokes the protected PyPI workflow; the `pypi` environment should require owner approval. License changes, credentials, and production deployments remain owner-controlled.
