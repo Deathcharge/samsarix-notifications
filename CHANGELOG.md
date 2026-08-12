@@ -6,6 +6,9 @@ All notable changes will be documented here. The project follows semantic versio
 
 - Rebrand the project and Python namespace as Samsarix Notifications under Samsarix LLC.
 - Adopt Mozilla Public License 2.0 with explicit copyright, support, and licensing contacts.
+- Add an optional durable SQLite outbox with transactional enqueue, scheduling, cross-process leases, retry rescheduling, dead-letter recovery, bounded retention, and a background worker.
+- Expose final failure retryability so durable callers can distinguish rescheduling from permanent failure.
+- Add a credential-free transactional order example and an operations guide for at-least-once delivery.
 - Add protected, attestable PyPI Trusted Publishing automation for GitHub Releases.
 - Replace simulated-success transports with real SMTP and HTTP webhook delivery.
 - Add explicit delivery results, typed errors, bounded retries, timeouts, concurrency, history, and process-local idempotency.

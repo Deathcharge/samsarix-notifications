@@ -38,3 +38,11 @@ class DeliveryError(NotificationError):
         retryable: bool = False,
     ) -> None:
         super().__init__(message, code=code, retryable=retryable)
+
+
+class OutboxConflictError(NotificationError):
+    """Raised when durable state conflicts with an enqueue or operator action."""
+
+
+class OutboxLeaseError(NotificationError):
+    """Raised when a worker can no longer finalize its claimed message."""

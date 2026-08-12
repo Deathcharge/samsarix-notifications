@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 import pytest
 
 from samsarix_notifications import (
+    DeliveryResult,
+    DeliveryStatus,
     NotificationPayload,
     NotificationValidationError,
     RetryPolicy,
@@ -27,6 +29,27 @@ def test_payload_normalizes_channel_and_naive_timestamp() -> None:
     request = base_payload(channel=" WEBHOOK ", created_at=datetime(2026, 1, 1))
     assert request.channel == "webhook"
     assert request.created_at.tzinfo is timezone.utc
+
+
+def test_delivery_result_preserves_existing_positional_deduplicated_argument() -> None:
+    now = datetime.now(timezone.utc)
+    result = DeliveryResult(
+        "notification-1",
+        "email",
+        "customer@example.com",
+        DeliveryStatus.DELIVERED,
+        1,
+        now,
+        now,
+        None,
+        None,
+        None,
+        None,
+        True,
+    )
+
+    assert result.deduplicated is True
+    assert result.retryable is None
 
 
 @pytest.mark.parametrize(

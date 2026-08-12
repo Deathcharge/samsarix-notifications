@@ -118,6 +118,7 @@ class NotificationService:
                 attempts=0,
                 code="service_closed",
                 message="Notification service is closed",
+                retryable=False,
             )
         if payload.idempotency_key is None or self._idempotency_cache_size == 0:
             return await self._execute(payload)
@@ -231,6 +232,7 @@ class NotificationService:
                 attempts=0,
                 code="unsupported_channel",
                 message=f"No transport is registered for channel {payload.channel}",
+                retryable=False,
             )
             self._record(result)
             return result
@@ -289,6 +291,7 @@ class NotificationService:
             attempts=attempts,
             code=last_error.code,
             message=str(last_error),
+            retryable=last_error.retryable,
         )
         self._record(result)
         return result
@@ -301,6 +304,7 @@ class NotificationService:
         attempts: int,
         code: str,
         message: str,
+        retryable: bool,
     ) -> DeliveryResult:
         return DeliveryResult(
             notification_id=payload.notification_id,
@@ -312,6 +316,7 @@ class NotificationService:
             completed_at=utc_now(),
             error_code=code,
             error_message=message,
+            retryable=retryable,
         )
 
     def _record(self, result: DeliveryResult) -> None:
