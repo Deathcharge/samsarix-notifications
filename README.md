@@ -222,13 +222,14 @@ The library does not add telemetry, analytics, or a cloud service. Direct delive
 
 The optional SQLite outbox necessarily stores recipients, subjects, bodies, JSON metadata, and provider receipts in plaintext. Place its database under appropriate filesystem permissions, backup, retention, disk-encryption, and privacy controls. Do not store credentials in notification metadata.
 
-Provider cost is controlled by the caller's provider contract. A conservative upper-bound formula is:
+Provider cost is controlled by the caller's provider contract. Conservative upper bounds are:
 
 ```text
-provider attempts <= requested notifications * (1 + configured max_retries)
+direct provider attempts <= requested notifications * (1 + configured max_retries)
+durable provider attempts <= queued notifications * configured max_delivery_attempts
 ```
 
-The defaults cap concurrent deliveries at 10, batch inputs at 1,000, and direct-send attempts at four per notification. The outbox adds a separate bounded worker-attempt budget. A distributed rate limiter, provider receipt polling, subscriber preferences, and billing controls remain outside this package's scope.
+The defaults cap concurrent deliveries at 10, batch inputs at 1,000, and direct-send attempts at four per notification. `OutboxWorker` makes exactly one provider call per durable attempt, disabling the dispatcher's inner retry loop so the worker budget is the authoritative total. A distributed rate limiter, provider receipt polling, subscriber preferences, and billing controls remain outside this package's scope.
 
 ## Release, support, and license
 

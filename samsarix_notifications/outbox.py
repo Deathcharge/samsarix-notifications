@@ -9,7 +9,7 @@ import json
 import sqlite3
 from collections.abc import Mapping
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
@@ -22,8 +22,8 @@ from .notification_service import NotificationService
 
 _TABLE = "samsarix_notification_outbox"
 _MAX_ENCODED_PAYLOAD_BYTES = 2 * 1024 * 1024
-_SCHEMA = f"""
-CREATE TABLE IF NOT EXISTS {_TABLE} (
+_SCHEMA_STATEMENTS = (
+    f"""CREATE TABLE IF NOT EXISTS {_TABLE} (
     message_id TEXT PRIMARY KEY,
     idempotency_key TEXT,
     payload_json TEXT NOT NULL,
@@ -39,13 +39,13 @@ CREATE TABLE IF NOT EXISTS {_TABLE} (
     last_error_message TEXT,
     provider_id TEXT,
     provider_status TEXT
-);
-CREATE UNIQUE INDEX IF NOT EXISTS samsarix_outbox_idempotency_key
+);""",
+    f"""CREATE UNIQUE INDEX IF NOT EXISTS samsarix_outbox_idempotency_key
     ON {_TABLE}(idempotency_key)
-    WHERE idempotency_key IS NOT NULL;
-CREATE INDEX IF NOT EXISTS samsarix_outbox_ready
-    ON {_TABLE}(status, available_at, enqueued_at);
-"""
+    WHERE idempotency_key IS NOT NULL;""",
+    f"""CREATE INDEX IF NOT EXISTS samsarix_outbox_ready
+    ON {_TABLE}(status, available_at, enqueued_at);""",
+)
 
 
 class OutboxStatus(str, Enum):
@@ -94,6 +94,12 @@ class OutboxRunResult:
     dead_lettered: int = 0
 
 
+@dataclass(frozen=True, slots=True)
+class _ClaimResult:
+    message: OutboxMessage | None
+    quarantined: int = 0
+
+
 class SQLiteOutbox:
     """Store notifications durably in a local SQLite database.
 
@@ -129,9 +135,16 @@ class SQLiteOutbox:
         own_connection = connection is None
         active = connection or self._connect()
         try:
-            active.executescript(_SCHEMA)
+            if own_connection:
+                active.execute("BEGIN IMMEDIATE")
+            for statement in _SCHEMA_STATEMENTS:
+                active.execute(statement)
             if own_connection:
                 active.commit()
+        except Exception:
+            if own_connection:
+                active.rollback()
+            raise
         finally:
             if own_connection:
                 active.close()
@@ -339,30 +352,39 @@ class SQLiteOutbox:
         worker_id: str,
         lease_seconds: float,
         now: datetime,
-    ) -> OutboxMessage | None:
+    ) -> _ClaimResult:
         lease_expires_at = now + timedelta(seconds=lease_seconds)
         with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute(
-                f"""
-                SELECT * FROM {_TABLE}
-                WHERE
-                    (status = ? AND available_at <= ?)
-                    OR
-                    (status = ? AND lease_expires_at <= ?)
-                ORDER BY available_at, enqueued_at, message_id
-                LIMIT 1
-                """,
-                (
-                    OutboxStatus.PENDING.value,
-                    _encode_time(now),
-                    OutboxStatus.PROCESSING.value,
-                    _encode_time(now),
-                ),
-            ).fetchone()
-            if row is None:
-                connection.commit()
-                return None
+            quarantined = 0
+            while True:
+                row = connection.execute(
+                    f"""
+                    SELECT * FROM {_TABLE}
+                    WHERE
+                        (status = ? AND available_at <= ?)
+                        OR
+                        (status = ? AND lease_expires_at <= ?)
+                    ORDER BY available_at, enqueued_at, message_id
+                    LIMIT 1
+                    """,
+                    (
+                        OutboxStatus.PENDING.value,
+                        _encode_time(now),
+                        OutboxStatus.PROCESSING.value,
+                        _encode_time(now),
+                    ),
+                ).fetchone()
+                if row is None:
+                    connection.commit()
+                    return _ClaimResult(None, quarantined)
+                try:
+                    _row_to_message(row)
+                except OutboxConflictError:
+                    self._quarantine_corrupt_row(connection, row, now=now)
+                    quarantined += 1
+                    continue
+                break
             message_id = str(row["message_id"])
             connection.execute(
                 f"""
@@ -383,7 +405,74 @@ class SQLiteOutbox:
             ).fetchone()
             connection.commit()
         assert claimed is not None
-        return _row_to_message(claimed)
+        return _ClaimResult(_row_to_message(claimed), quarantined)
+
+    def _quarantine_structurally_corrupt(
+        self,
+        *,
+        now: datetime,
+        limit: int,
+    ) -> int:
+        with closing(self._connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            rows = connection.execute(
+                f"""
+                SELECT * FROM {_TABLE}
+                WHERE status NOT IN (?, ?, ?, ?)
+                   OR (
+                       status IN (?, ?)
+                       AND (
+                           typeof(attempt_count) != 'integer'
+                           OR attempt_count < 0
+                           OR julianday(enqueued_at) IS NULL
+                           OR julianday(available_at) IS NULL
+                           OR (lease_expires_at IS NOT NULL AND julianday(lease_expires_at) IS NULL)
+                           OR (completed_at IS NOT NULL AND julianday(completed_at) IS NULL)
+                       )
+                   )
+                ORDER BY enqueued_at, message_id
+                LIMIT ?
+                """,
+                (
+                    *(status.value for status in OutboxStatus),
+                    OutboxStatus.PENDING.value,
+                    OutboxStatus.PROCESSING.value,
+                    limit,
+                ),
+            ).fetchall()
+            for row in rows:
+                self._quarantine_corrupt_row(connection, row, now=now)
+            connection.commit()
+        return len(rows)
+
+    @staticmethod
+    def _quarantine_corrupt_row(
+        connection: sqlite3.Connection,
+        row: sqlite3.Row,
+        *,
+        now: datetime,
+    ) -> None:
+        cursor = connection.execute(
+            f"""
+            UPDATE {_TABLE}
+            SET status = ?, lease_owner = NULL, lease_expires_at = NULL,
+                completed_at = ?, last_error_code = ?, last_error_message = ?,
+                provider_id = NULL, provider_status = NULL
+            WHERE message_id = ?
+            """,
+            (
+                OutboxStatus.DEAD_LETTER.value,
+                _encode_time(now),
+                "outbox_record_corrupt",
+                "stored outbox record failed integrity validation",
+                str(row["message_id"]),
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise OutboxConflictError(
+                "corrupt outbox record could not be quarantined",
+                code="outbox_quarantine_failed",
+            )
 
     def _mark_delivered(
         self,
@@ -457,6 +546,7 @@ class SQLiteOutbox:
                     last_error_code = ?, last_error_message = ?,
                     provider_id = ?, provider_status = ?
                 WHERE message_id = ? AND status = ? AND lease_owner = ?
+                  AND attempt_count = ?
                 """,
                 (
                     status.value,
@@ -469,6 +559,7 @@ class SQLiteOutbox:
                     message.message_id,
                     OutboxStatus.PROCESSING.value,
                     worker_id,
+                    message.attempt_count,
                 ),
             )
             if cursor.rowcount != 1:
@@ -564,19 +655,32 @@ class OutboxWorker:
 
         if not 1 <= limit <= 10_000:
             raise NotificationValidationError("limit must be between 1 and 10000")
-        claimed = delivered = rescheduled = dead_lettered = 0
+        claimed = delivered = rescheduled = 0
+        dead_lettered = await asyncio.to_thread(
+            self.outbox._quarantine_structurally_corrupt,
+            now=utc_now(),
+            limit=limit,
+        )
         for _ in range(limit):
             now = utc_now()
-            message = await asyncio.to_thread(
+            claim = await asyncio.to_thread(
                 self.outbox._claim,
                 worker_id=self.worker_id,
                 lease_seconds=self.lease_seconds,
                 now=now,
             )
+            dead_lettered += claim.quarantined
+            message = claim.message
             if message is None:
                 break
             claimed += 1
-            result = await self.service.send(message.payload)
+            # The durable attempt count is the single authoritative provider-call
+            # budget. Disable the dispatcher's inner retry loop for this send.
+            delivery_payload = replace(
+                message.payload,
+                retry_count=message.payload.max_retries,
+            )
+            result = await self.service.send(delivery_payload)
             if result.success:
                 await asyncio.to_thread(
                     self.outbox._mark_delivered,
@@ -719,21 +823,41 @@ def _json_dumps(value: object) -> str:
 
 
 def _row_to_message(row: sqlite3.Row) -> OutboxMessage:
-    return OutboxMessage(
-        message_id=str(row["message_id"]),
-        payload=_decode_payload(str(row["payload_json"])),
-        status=OutboxStatus(str(row["status"])),
-        enqueued_at=_decode_time(row["enqueued_at"]),
-        available_at=_decode_time(row["available_at"]),
-        attempt_count=int(row["attempt_count"]),
-        lease_owner=_optional_string(row["lease_owner"]),
-        lease_expires_at=_decode_optional_time(row["lease_expires_at"]),
-        completed_at=_decode_optional_time(row["completed_at"]),
-        last_error_code=_optional_string(row["last_error_code"]),
-        last_error_message=_optional_string(row["last_error_message"]),
-        provider_id=_optional_string(row["provider_id"]),
-        provider_status=_optional_string(row["provider_status"]),
-    )
+    try:
+        message_id = str(row["message_id"])
+        payload = _decode_payload(str(row["payload_json"]))
+        if payload.notification_id != message_id:
+            raise OutboxConflictError(
+                "stored outbox payload identity does not match its row",
+                code="outbox_payload_corrupt",
+            )
+        _, fingerprint = _encode_payload(payload)
+        if fingerprint != str(row["payload_sha256"]):
+            raise OutboxConflictError(
+                "stored outbox payload fingerprint does not match",
+                code="outbox_payload_corrupt",
+            )
+        return OutboxMessage(
+            message_id=message_id,
+            payload=payload,
+            status=OutboxStatus(str(row["status"])),
+            enqueued_at=_decode_time(row["enqueued_at"]),
+            available_at=_decode_time(row["available_at"]),
+            attempt_count=int(row["attempt_count"]),
+            lease_owner=_optional_string(row["lease_owner"]),
+            lease_expires_at=_decode_optional_time(row["lease_expires_at"]),
+            completed_at=_decode_optional_time(row["completed_at"]),
+            last_error_code=_optional_string(row["last_error_code"]),
+            last_error_message=_optional_string(row["last_error_message"]),
+            provider_id=_optional_string(row["provider_id"]),
+            provider_status=_optional_string(row["provider_status"]),
+        )
+    except OutboxConflictError:
+        raise
+    except (KeyError, TypeError, ValueError, OverflowError, NotificationValidationError) as exc:
+        raise OutboxConflictError(
+            "stored outbox record is invalid", code="outbox_record_corrupt"
+        ) from exc
 
 
 def _normalized_time(value: datetime, *, name: str) -> datetime:

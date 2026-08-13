@@ -79,7 +79,9 @@ async def serve(notifications: NotificationService) -> None:
 - Retryable failures return to the pending queue with bounded exponential delay. Permanent failures and exhausted delivery budgets enter `dead_letter`.
 - `requeue_dead_letter` is an explicit operator action and resets the worker-attempt budget.
 
-Choose a lease longer than the maximum expected `NotificationService.send` duration, including its transport retries. The default five-minute lease safely exceeds the default dispatcher budget. Provider-side idempotency is still recommended whenever the provider supports it.
+Choose a lease longer than the maximum expected single provider attempt. `OutboxWorker` disables the dispatcher's inner retry loop and makes one provider call per durable claim, so `max_delivery_attempts` is the total provider-call budget. The default five-minute lease safely exceeds the default per-attempt timeout. Provider-side idempotency is still recommended whenever the provider supports it.
+
+Every claim has a monotonically increasing attempt generation in addition to its worker ID. A stale attempt therefore cannot finalize a newer claim even when two processes reuse the same configured worker ID. Records that fail stored-payload, timestamp, status, or counter integrity checks are moved to `dead_letter` with a generic corruption code before any transport is called; the worker continues with healthy rows. Corrupt payload content remains unreadable through the normal message API and should be inspected or removed only through an application-controlled database recovery procedure.
 
 ## Scheduling and operations
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 from collections.abc import Sequence
 from contextlib import closing
@@ -30,8 +31,10 @@ class ScriptedTransport:
     def __init__(self, outcomes: Sequence[TransportResult | Exception]) -> None:
         self.outcomes = list(outcomes)
         self.calls = 0
+        self.payloads: list[NotificationPayload] = []
 
-    async def send(self, _payload: NotificationPayload) -> TransportResult:
+    async def send(self, request: NotificationPayload) -> TransportResult:
+        self.payloads.append(request)
         outcome = self.outcomes[min(self.calls, len(self.outcomes) - 1)]
         self.calls += 1
         if isinstance(outcome, Exception):
@@ -130,6 +133,23 @@ def test_enqueue_can_share_an_application_transaction(tmp_path: Path) -> None:
 
     assert connection.execute("SELECT COUNT(*) FROM orders").fetchone() == (0,)
     assert store.get("notification-1") is None
+    connection.close()
+
+
+def test_initialize_preserves_caller_transaction_ownership(tmp_path: Path) -> None:
+    database = tmp_path / "application.sqlite3"
+    store = SQLiteOutbox(database, initialize=False)
+    connection = sqlite3.connect(database)
+    connection.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY)")
+    connection.commit()
+    connection.execute("INSERT INTO orders (id) VALUES (456)")
+
+    store.initialize(connection=connection)
+
+    assert connection.in_transaction
+    with closing(sqlite3.connect(database)) as observer:
+        assert observer.execute("SELECT COUNT(*) FROM orders").fetchone() == (0,)
+    connection.rollback()
     connection.close()
 
 
@@ -271,8 +291,10 @@ async def test_expired_lease_is_recovered_and_old_owner_cannot_finalize(tmp_path
     store = outbox(tmp_path)
     store.enqueue(payload())
     now = utc_now()
-    first = store._claim(worker_id="worker-one", lease_seconds=1, now=now)
-    second = store._claim(worker_id="worker-two", lease_seconds=60, now=now + timedelta(seconds=2))
+    first = store._claim(worker_id="worker-one", lease_seconds=1, now=now).message
+    second = store._claim(
+        worker_id="worker-two", lease_seconds=60, now=now + timedelta(seconds=2)
+    ).message
     assert first is not None
     assert second is not None
     assert second.attempt_count == 2
@@ -284,6 +306,30 @@ async def test_expired_lease_is_recovered_and_old_owner_cannot_finalize(tmp_path
     with pytest.raises(OutboxLeaseError) as lost:
         store._mark_delivered(first, worker_id="worker-one", result=result)
     assert lost.value.code == "outbox_lease_lost"
+
+
+@pytest.mark.asyncio
+async def test_attempt_generation_fences_reused_worker_id(tmp_path: Path) -> None:
+    store = outbox(tmp_path)
+    store.enqueue(payload())
+    now = utc_now()
+    first = store._claim(worker_id="stable-worker", lease_seconds=1, now=now).message
+    second = store._claim(
+        worker_id="stable-worker", lease_seconds=60, now=now + timedelta(seconds=2)
+    ).message
+    assert first is not None and second is not None
+
+    service = NotificationService(
+        transports={"test": ScriptedTransport([TransportResult(provider_status="accepted")])}
+    )
+    result = await service.send(first.payload)
+    with pytest.raises(OutboxLeaseError, match="no longer owned"):
+        store._mark_delivered(first, worker_id="stable-worker", result=result)
+
+    store._mark_delivered(second, worker_id="stable-worker", result=result)
+    delivered = store.get("notification-1")
+    assert delivered is not None
+    assert delivered.status is OutboxStatus.DELIVERED
 
 
 @pytest.mark.asyncio
@@ -366,6 +412,95 @@ def test_validation_and_corrupt_storage_are_explicit(tmp_path: Path) -> None:
     with pytest.raises(OutboxConflictError) as corrupt:
         store.get("notification-1")
     assert corrupt.value.code == "outbox_payload_corrupt"
+
+
+@pytest.mark.asyncio
+async def test_worker_quarantines_payload_corruption_and_continues(tmp_path: Path) -> None:
+    store = outbox(tmp_path)
+    store.enqueue(payload())
+    store.enqueue(payload(notification_id="notification-2", recipient="customer-2"))
+    with closing(sqlite3.connect(store.database)) as connection:
+        encoded = connection.execute(
+            "SELECT payload_json FROM samsarix_notification_outbox WHERE message_id = ?",
+            ("notification-1",),
+        ).fetchone()[0]
+        changed = json.loads(encoded)
+        changed["recipient"] = "attacker-controlled"
+        connection.execute(
+            "UPDATE samsarix_notification_outbox SET payload_json = ? WHERE message_id = ?",
+            (json.dumps(changed), "notification-1"),
+        )
+        connection.commit()
+    transport = ScriptedTransport([TransportResult(provider_status="accepted")])
+    worker = OutboxWorker(store, NotificationService(transports={"test": transport}))
+
+    summary = await worker.run_once()
+
+    assert summary.dead_lettered == 1
+    assert summary.delivered == summary.claimed == 1
+    assert [request.recipient for request in transport.payloads] == ["customer-2"]
+    assert store.counts()[OutboxStatus.DEAD_LETTER] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("corruption", ("timestamp", "status", "counter"))
+async def test_worker_quarantines_structurally_corrupt_rows(
+    tmp_path: Path,
+    corruption: str,
+) -> None:
+    store = outbox(tmp_path)
+    store.enqueue(payload())
+    store.enqueue(payload(notification_id="notification-2"))
+    with closing(sqlite3.connect(store.database)) as connection:
+        if corruption == "timestamp":
+            connection.execute(
+                "UPDATE samsarix_notification_outbox SET available_at = 'not-a-time' "
+                "WHERE message_id = 'notification-1'"
+            )
+        else:
+            connection.execute("PRAGMA ignore_check_constraints = ON")
+            if corruption == "status":
+                connection.execute(
+                    "UPDATE samsarix_notification_outbox SET status = 'broken' "
+                    "WHERE message_id = 'notification-1'"
+                )
+            else:
+                connection.execute(
+                    "UPDATE samsarix_notification_outbox SET attempt_count = 'broken' "
+                    "WHERE message_id = 'notification-1'"
+                )
+        connection.commit()
+    transport = ScriptedTransport([TransportResult()])
+    worker = OutboxWorker(store, NotificationService(transports={"test": transport}))
+
+    summary = await worker.run_once()
+
+    assert summary.dead_lettered == 1
+    assert summary.delivered == 1
+    assert transport.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_worker_attempt_budget_is_total_provider_call_budget(tmp_path: Path) -> None:
+    store = outbox(tmp_path)
+    store.enqueue(payload(max_retries=2))
+    transport = ScriptedTransport([DeliveryError("offline", code="offline", retryable=True)])
+    service = NotificationService(
+        transports={"test": transport},
+        retry_policy=RetryPolicy(max_retries=2, base_delay_seconds=0, max_delay_seconds=0),
+    )
+    worker = OutboxWorker(
+        store,
+        service,
+        max_delivery_attempts=3,
+        base_delay_seconds=0,
+        max_delay_seconds=0,
+    )
+
+    summary = await worker.run_once(limit=10)
+
+    assert summary.claimed == transport.calls == 3
+    assert summary.dead_lettered == 1
 
 
 def test_worker_configuration_is_bounded(tmp_path: Path) -> None:
