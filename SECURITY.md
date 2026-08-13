@@ -23,7 +23,7 @@ Samsarix Notifications is an embedded library, not an authorization service. The
 
 Network egress controls are recommended for server deployments. DNS rebinding remains a residual risk because application-level DNS validation and the network client's connection are separate operations. Exact host allowlists are mandatory for webhook delivery.
 
-The package stores no durable data and emits no telemetry. Delivery history and idempotency are bounded, process-local features; applications requiring crash-safe delivery must persist work before invoking the package.
+The package emits no telemetry. Direct-delivery history and idempotency are bounded, process-local features. The optional SQLite outbox is a durable trust boundary: it stores recipients, subjects, bodies, metadata, scheduling state, bounded error text, and provider receipts in plaintext. Operators must apply filesystem access controls, encryption, backup, retention, and secure-deletion policy appropriate to that content, and must not place credentials in metadata. Stored payload fingerprints are checked before delivery; corrupt active records are dead-lettered without calling a provider. Outbox delivery uses one provider call per durable attempt, so `max_delivery_attempts` is its explicit cost-amplification bound.
 
 ## Attack surfaces and attacker stories
 

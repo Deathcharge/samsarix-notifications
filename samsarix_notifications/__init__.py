@@ -8,6 +8,8 @@ from .errors import (
     DeliveryError,
     NotificationError,
     NotificationValidationError,
+    OutboxConflictError,
+    OutboxLeaseError,
 )
 from .models import (
     DeliveryResult,
@@ -18,6 +20,14 @@ from .models import (
     TransportResult,
 )
 from .notification_service import NotificationService, NotificationTransport
+from .outbox import (
+    EnqueueResult,
+    OutboxMessage,
+    OutboxRunResult,
+    OutboxStatus,
+    OutboxWorker,
+    SQLiteOutbox,
+)
 from .webhook_router import WebhookPolicy, WebhookRoute, WebhookRouter
 
 __version__ = "0.1.0"
@@ -34,14 +44,22 @@ __all__ = [
     "EmailAttachment",
     "EmailService",
     "EmailTemplate",
+    "EnqueueResult",
     "NotificationChannel",
     "NotificationError",
     "NotificationPayload",
     "NotificationService",
     "NotificationTransport",
     "NotificationValidationError",
+    "OutboxConflictError",
+    "OutboxLeaseError",
+    "OutboxMessage",
+    "OutboxRunResult",
+    "OutboxStatus",
+    "OutboxWorker",
     "RetryPolicy",
     "SMTPConfig",
+    "SQLiteOutbox",
     "TransportResult",
     "WebhookPolicy",
     "WebhookRoute",

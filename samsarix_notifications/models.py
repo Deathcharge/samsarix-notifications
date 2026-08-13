@@ -121,6 +121,7 @@ class DeliveryResult:
     error_code: str | None = None
     error_message: str | None = None
     deduplicated: bool = False
+    retryable: bool | None = None
 
     @property
     def success(self) -> bool:
@@ -149,6 +150,7 @@ class DeliveryResult:
             "error_code": self.error_code,
             "error_message": self.error_message,
             "deduplicated": self.deduplicated,
+            "retryable": self.retryable,
         }
 
 

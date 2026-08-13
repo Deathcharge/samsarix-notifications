@@ -1,12 +1,12 @@
 # Samsarix Notifications
 
-Samsarix Notifications is a small, local-first Python library from Samsarix LLC for delivering email and JSON webhooks from an existing application. It gives application developers one async dispatch interface, explicit delivery results, bounded retries and concurrency, process-local idempotency, safe webhook destination defaults, and injectable transports for testing or additional channels.
+Samsarix Notifications is a small, local-first Python library from Samsarix LLC for delivering email and JSON webhooks from an existing application. It gives application developers one async dispatch interface, explicit delivery results, bounded retries and concurrency, safe webhook destination defaults, injectable transports, and an optional crash-safe SQLite outbox.
 
-It is not a hosted notification platform, durable queue, or user-preference service. Version `0.1.0` is a release candidate intended for real evaluation and is not yet published on PyPI.
+It is not a hosted notification platform, subscriber-preference service, or general distributed task queue. Version `0.1.0` is a release candidate intended for real evaluation and is not yet published on PyPI.
 
 ## Who it is for
 
-Use this package when a Python service or automation needs a dependable embedded notification boundary without adding a database or operating another service. If you need hundreds of provider integrations, a visual workflow editor, hosted preference management, or cross-process delivery guarantees, a mature platform such as Apprise, Courier, or Novu is a better fit.
+Use this package when a Python service or automation needs a dependable embedded notification boundary without operating another service. Direct delivery adds no database; applications that need crash recovery can opt into the standard-library SQLite outbox. If you need hundreds of provider integrations, a visual workflow editor, hosted preference management, or a high-throughput distributed broker, a mature platform such as Apprise, Courier, or Novu is a better fit.
 
 ## Requirements and installation
 
@@ -85,6 +85,29 @@ python examples/local_webhook.py
 
 That example explicitly opts into private HTTP destinations for local development. Do not copy that policy into a server deployment.
 
+## Durable delivery without another service
+
+`SQLiteOutbox` persists a notification before network delivery. `OutboxWorker` uses leases so multiple local processes can safely cooperate, recovers work after an expired lease, reschedules retryable failures, and moves permanent or exhausted failures to a dead-letter state.
+
+```python
+from samsarix_notifications import NotificationPayload, SQLiteOutbox
+
+outbox = SQLiteOutbox("application.sqlite3")
+queued = outbox.enqueue(
+    NotificationPayload(
+        channel="email",
+        recipient="customer@example.com",
+        subject="Order confirmed",
+        body="Order 456 has been confirmed.",
+        metadata={"order_id": 456},
+        idempotency_key="order-456-confirmation",
+    )
+)
+print(queued.created, queued.message.status.value)
+```
+
+When application data uses the same SQLite database, `enqueue(..., connection=connection)` can participate in the caller's transaction. This implements the transactional-outbox boundary without making a network call while business data is locked. See [the durable outbox guide](docs/OUTBOX.md) and run `python examples/durable_outbox.py` for a complete credential-free order example.
+
 ## SMTP email
 
 ```python
@@ -126,7 +149,8 @@ asyncio.run(main())
 - Retries are capped at three by default and ten by hard validation. At worst, one request performs `1 + max_retries` provider attempts.
 - Batches are capped at 1,000 payloads by default and 10,000 by hard validation; transport concurrency remains independently bounded.
 - A supplied idempotency key deduplicates successful and in-flight sends within one `NotificationService` process.
-- Delivery history and idempotency caches are bounded and process-local. They are not crash-safe persistence.
+- Delivery results expose whether a final failure remains retryable, allowing a durable caller to make an explicit reschedule decision.
+- Direct-delivery history and idempotency caches are bounded and process-local. `SQLiteOutbox` adds optional crash-safe, cross-process persistence with at-least-once delivery semantics.
 - Batch results preserve input order and duplicate recipients.
 - Cancellation propagates for ordinary sends. An in-flight idempotent send is shielded so a cancelled waiter cannot cause another caller to repeat an ambiguous external side effect.
 
@@ -164,6 +188,7 @@ DNS validation and the later network connection are separate operations, so DNS 
 
 - `NotificationPayload`, `DeliveryResult`, and `RetryPolicy` define the public delivery contract.
 - `NotificationService` handles transport selection, concurrency, retries, idempotency, and bounded result history.
+- `SQLiteOutbox` persists JSON-safe payloads, schedules delivery, coordinates process leases, records provider receipts, and retains dead letters; `OutboxWorker` connects it to `NotificationService`.
 - `EmailService` builds MIME messages and performs SMTP I/O in a worker thread.
 - `WebhookRouter` supports direct notifications and named event routes over HTTPX.
 - `AlertSystem` is a bounded process-local active-alert registry. It intentionally does not imply durable alert persistence or escalation automation.
@@ -193,15 +218,18 @@ CI runs these checks on Python 3.10 through 3.14. The repository deliberately ha
 
 ## Privacy, reliability, and cost
 
-The library does not add telemetry, analytics, a database, or a cloud service. Notification content and credentials remain in the host process and configured providers. It does not log recipients, subjects, bodies, secrets, or destination URLs. Retained delivery results contain recipient identifiers but never bodies; set `history_limit=0` when even that process-local retention is inappropriate.
+The library does not add telemetry, analytics, or a cloud service. Direct delivery keeps notification content and credentials in the host process and configured providers. It does not log recipients, subjects, bodies, secrets, or destination URLs. Retained in-memory delivery results contain recipient identifiers but never bodies; set `history_limit=0` when even that process-local retention is inappropriate.
 
-Provider cost is controlled by the caller's provider contract. A conservative upper-bound formula is:
+The optional SQLite outbox necessarily stores recipients, subjects, bodies, JSON metadata, and provider receipts in plaintext. Place its database under appropriate filesystem permissions, backup, retention, disk-encryption, and privacy controls. Do not store credentials in notification metadata.
+
+Provider cost is controlled by the caller's provider contract. Conservative upper bounds are:
 
 ```text
-provider attempts <= requested notifications * (1 + configured max_retries)
+direct provider attempts <= requested notifications * (1 + configured max_retries)
+durable provider attempts <= queued notifications * configured max_delivery_attempts
 ```
 
-The defaults cap concurrent deliveries at 10, batch inputs at 1,000, and total attempts at four per notification. A durable queue, distributed rate limiter, provider receipt polling, subscriber preferences, and billing controls remain outside this package's scope.
+The defaults cap concurrent deliveries at 10, batch inputs at 1,000, and direct-send attempts at four per notification. `OutboxWorker` makes exactly one provider call per durable attempt, disabling the dispatcher's inner retry loop so the worker budget is the authoritative total. A distributed rate limiter, provider receipt polling, subscriber preferences, and billing controls remain outside this package's scope.
 
 ## Release, support, and license
 

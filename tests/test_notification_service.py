@@ -107,6 +107,7 @@ async def test_nonretryable_error_returns_failure_without_retry() -> None:
 
     assert not result
     assert result.error_code == "bad"
+    assert result.retryable is False
     assert result.attempts == 1
     assert transport.calls == 1
     assert service.failed_notifications == (result,)
@@ -142,6 +143,7 @@ async def test_timeout_is_a_stable_failure() -> None:
 
     assert not result
     assert result.error_code == "attempt_timeout"
+    assert result.retryable is True
 
 
 @pytest.mark.asyncio
