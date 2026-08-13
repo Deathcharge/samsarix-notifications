@@ -153,6 +153,27 @@ def test_initialize_preserves_caller_transaction_ownership(tmp_path: Path) -> No
     connection.close()
 
 
+def test_initialize_preserves_custom_caller_row_factory(tmp_path: Path) -> None:
+    database = tmp_path / "application.sqlite3"
+    store = SQLiteOutbox(database, initialize=False)
+    connection = sqlite3.connect(database)
+
+    def dictionary_rows(cursor: sqlite3.Cursor, row: tuple[object, ...]) -> dict[str, object]:
+        return {
+            description[0]: value
+            for description, value in zip(cursor.description, row, strict=True)
+        }
+
+    connection.row_factory = dictionary_rows
+    store.initialize(connection=connection)
+
+    assert connection.row_factory is dictionary_rows
+    columns = connection.execute("PRAGMA table_info(samsarix_notification_outbox)").fetchall()
+    assert "lease_token" in {str(column["name"]) for column in columns}
+    connection.rollback()
+    connection.close()
+
+
 @pytest.mark.asyncio
 async def test_worker_delivers_and_persists_provider_receipt(tmp_path: Path) -> None:
     store = outbox(tmp_path)

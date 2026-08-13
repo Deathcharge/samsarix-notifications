@@ -136,6 +136,8 @@ class SQLiteOutbox:
 
         own_connection = connection is None
         active = connection or self._connect()
+        previous_row_factory = active.row_factory
+        active.row_factory = sqlite3.Row
         try:
             if own_connection:
                 active.execute("BEGIN IMMEDIATE")
@@ -153,6 +155,8 @@ class SQLiteOutbox:
                 active.rollback()
             raise
         finally:
+            if not own_connection:
+                active.row_factory = previous_row_factory
             if own_connection:
                 active.close()
 
