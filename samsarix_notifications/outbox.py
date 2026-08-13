@@ -9,7 +9,7 @@ import json
 import sqlite3
 from collections.abc import Mapping
 from contextlib import closing
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
@@ -33,6 +33,7 @@ _SCHEMA_STATEMENTS = (
     available_at TEXT NOT NULL,
     attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
     lease_owner TEXT,
+    lease_token TEXT,
     lease_expires_at TEXT,
     completed_at TEXT,
     last_error_code TEXT,
@@ -68,6 +69,7 @@ class OutboxMessage:
     available_at: datetime
     attempt_count: int
     lease_owner: str | None = None
+    lease_token: str | None = None
     lease_expires_at: datetime | None = None
     completed_at: datetime | None = None
     last_error_code: str | None = None
@@ -139,6 +141,11 @@ class SQLiteOutbox:
                 active.execute("BEGIN IMMEDIATE")
             for statement in _SCHEMA_STATEMENTS:
                 active.execute(statement)
+            columns = {
+                str(row[1]) for row in active.execute(f"PRAGMA table_info({_TABLE})").fetchall()
+            }
+            if "lease_token" not in columns:
+                active.execute(f"ALTER TABLE {_TABLE} ADD COLUMN lease_token TEXT")
             if own_connection:
                 active.commit()
         except Exception:
@@ -296,7 +303,7 @@ class SQLiteOutbox:
                 f"""
                 UPDATE {_TABLE}
                 SET status = ?, available_at = ?, lease_owner = NULL,
-                    lease_expires_at = NULL, completed_at = NULL,
+                    lease_token = NULL, lease_expires_at = NULL, completed_at = NULL,
                     attempt_count = 0, last_error_code = NULL,
                     last_error_message = NULL, provider_id = NULL,
                     provider_status = NULL
@@ -352,8 +359,10 @@ class SQLiteOutbox:
         worker_id: str,
         lease_seconds: float,
         now: datetime,
+        quarantine_limit: int,
     ) -> _ClaimResult:
         lease_expires_at = now + timedelta(seconds=lease_seconds)
+        lease_token = str(uuid4())
         with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             quarantined = 0
@@ -383,19 +392,23 @@ class SQLiteOutbox:
                 except OutboxConflictError:
                     self._quarantine_corrupt_row(connection, row, now=now)
                     quarantined += 1
+                    if quarantined >= quarantine_limit:
+                        connection.commit()
+                        return _ClaimResult(None, quarantined)
                     continue
                 break
             message_id = str(row["message_id"])
             connection.execute(
                 f"""
                 UPDATE {_TABLE}
-                SET status = ?, lease_owner = ?, lease_expires_at = ?,
+                SET status = ?, lease_owner = ?, lease_token = ?, lease_expires_at = ?,
                     attempt_count = attempt_count + 1
                 WHERE message_id = ?
                 """,
                 (
                     OutboxStatus.PROCESSING.value,
                     worker_id,
+                    lease_token,
                     _encode_time(lease_expires_at),
                     message_id,
                 ),
@@ -455,7 +468,7 @@ class SQLiteOutbox:
         cursor = connection.execute(
             f"""
             UPDATE {_TABLE}
-            SET status = ?, lease_owner = NULL, lease_expires_at = NULL,
+            SET status = ?, lease_owner = NULL, lease_token = NULL, lease_expires_at = NULL,
                 completed_at = ?, last_error_code = ?, last_error_message = ?,
                 provider_id = NULL, provider_status = NULL
             WHERE message_id = ?
@@ -542,11 +555,11 @@ class SQLiteOutbox:
                 f"""
                 UPDATE {_TABLE}
                 SET status = ?, available_at = ?, lease_owner = NULL,
-                    lease_expires_at = NULL, completed_at = ?,
+                    lease_token = NULL, lease_expires_at = NULL, completed_at = ?,
                     last_error_code = ?, last_error_message = ?,
                     provider_id = ?, provider_status = ?
                 WHERE message_id = ? AND status = ? AND lease_owner = ?
-                  AND attempt_count = ?
+                  AND lease_token = ?
                 """,
                 (
                     status.value,
@@ -559,7 +572,7 @@ class SQLiteOutbox:
                     message.message_id,
                     OutboxStatus.PROCESSING.value,
                     worker_id,
-                    message.attempt_count,
+                    message.lease_token,
                 ),
             )
             if cursor.rowcount != 1:
@@ -656,31 +669,32 @@ class OutboxWorker:
         if not 1 <= limit <= 10_000:
             raise NotificationValidationError("limit must be between 1 and 10000")
         claimed = delivered = rescheduled = 0
+        remaining = limit
         dead_lettered = await asyncio.to_thread(
             self.outbox._quarantine_structurally_corrupt,
             now=utc_now(),
-            limit=limit,
+            limit=remaining,
         )
-        for _ in range(limit):
+        remaining -= dead_lettered
+        while remaining > 0:
             now = utc_now()
             claim = await asyncio.to_thread(
                 self.outbox._claim,
                 worker_id=self.worker_id,
                 lease_seconds=self.lease_seconds,
                 now=now,
+                quarantine_limit=remaining,
             )
             dead_lettered += claim.quarantined
+            remaining -= claim.quarantined
             message = claim.message
             if message is None:
+                if claim.quarantined and remaining:
+                    continue
                 break
             claimed += 1
-            # The durable attempt count is the single authoritative provider-call
-            # budget. Disable the dispatcher's inner retry loop for this send.
-            delivery_payload = replace(
-                message.payload,
-                retry_count=message.payload.max_retries,
-            )
-            result = await self.service.send(delivery_payload)
+            remaining -= 1
+            result = await self.service._send_without_retries(message.payload)
             if result.success:
                 await asyncio.to_thread(
                     self.outbox._mark_delivered,
@@ -845,6 +859,7 @@ def _row_to_message(row: sqlite3.Row) -> OutboxMessage:
             available_at=_decode_time(row["available_at"]),
             attempt_count=int(row["attempt_count"]),
             lease_owner=_optional_string(row["lease_owner"]),
+            lease_token=_optional_string(row["lease_token"]),
             lease_expires_at=_decode_optional_time(row["lease_expires_at"]),
             completed_at=_decode_optional_time(row["completed_at"]),
             last_error_code=_optional_string(row["last_error_code"]),

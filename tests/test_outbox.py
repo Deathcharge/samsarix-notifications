@@ -291,9 +291,11 @@ async def test_expired_lease_is_recovered_and_old_owner_cannot_finalize(tmp_path
     store = outbox(tmp_path)
     store.enqueue(payload())
     now = utc_now()
-    first = store._claim(worker_id="worker-one", lease_seconds=1, now=now).message
+    first = store._claim(
+        worker_id="worker-one", lease_seconds=1, now=now, quarantine_limit=1
+    ).message
     second = store._claim(
-        worker_id="worker-two", lease_seconds=60, now=now + timedelta(seconds=2)
+        worker_id="worker-two", lease_seconds=60, now=now + timedelta(seconds=2), quarantine_limit=1
     ).message
     assert first is not None
     assert second is not None
@@ -313,9 +315,14 @@ async def test_attempt_generation_fences_reused_worker_id(tmp_path: Path) -> Non
     store = outbox(tmp_path)
     store.enqueue(payload())
     now = utc_now()
-    first = store._claim(worker_id="stable-worker", lease_seconds=1, now=now).message
+    first = store._claim(
+        worker_id="stable-worker", lease_seconds=1, now=now, quarantine_limit=1
+    ).message
     second = store._claim(
-        worker_id="stable-worker", lease_seconds=60, now=now + timedelta(seconds=2)
+        worker_id="stable-worker",
+        lease_seconds=60,
+        now=now + timedelta(seconds=2),
+        quarantine_limit=1,
     ).message
     assert first is not None and second is not None
 
@@ -330,6 +337,45 @@ async def test_attempt_generation_fences_reused_worker_id(tmp_path: Path) -> Non
     delivered = store.get("notification-1")
     assert delivered is not None
     assert delivered.status is OutboxStatus.DELIVERED
+
+
+@pytest.mark.asyncio
+async def test_lease_token_fences_stale_claim_after_dead_letter_requeue(tmp_path: Path) -> None:
+    store = outbox(tmp_path)
+    store.enqueue(payload())
+    now = utc_now()
+    first = store._claim(
+        worker_id="stable-worker", lease_seconds=1, now=now, quarantine_limit=1
+    ).message
+    second = store._claim(
+        worker_id="stable-worker",
+        lease_seconds=1,
+        now=now + timedelta(seconds=2),
+        quarantine_limit=1,
+    ).message
+    assert first is not None and second is not None
+    failure = await NotificationService(
+        transports={"test": ScriptedTransport([DeliveryError("bad", code="bad")])}
+    ).send(second.payload)
+    store._mark_dead_letter(second, worker_id="stable-worker", result=failure)
+    store.requeue_dead_letter(second.message_id)
+    third = store._claim(
+        worker_id="stable-worker",
+        lease_seconds=60,
+        now=now + timedelta(seconds=3),
+        quarantine_limit=1,
+    ).message
+    assert third is not None
+    assert third.attempt_count == first.attempt_count == 1
+    assert third.lease_token != first.lease_token
+
+    success = await NotificationService(
+        transports={"test": ScriptedTransport([TransportResult()])}
+    ).send(first.payload)
+    with pytest.raises(OutboxLeaseError, match="no longer owned"):
+        store._mark_delivered(first, worker_id="stable-worker", result=success)
+
+    store._mark_delivered(third, worker_id="stable-worker", result=success)
 
 
 @pytest.mark.asyncio
@@ -443,6 +489,25 @@ async def test_worker_quarantines_payload_corruption_and_continues(tmp_path: Pat
 
 
 @pytest.mark.asyncio
+async def test_corruption_quarantine_respects_run_limit(tmp_path: Path) -> None:
+    store = outbox(tmp_path)
+    for index in range(3):
+        store.enqueue(payload(notification_id=f"notification-{index}"))
+    with closing(sqlite3.connect(store.database)) as connection:
+        connection.execute("UPDATE samsarix_notification_outbox SET payload_json = 'not-json'")
+        connection.commit()
+    transport = ScriptedTransport([TransportResult()])
+    worker = OutboxWorker(store, NotificationService(transports={"test": transport}))
+
+    summary = await worker.run_once(limit=1)
+
+    assert summary.dead_lettered == 1
+    assert summary.claimed == transport.calls == 0
+    assert store.counts()[OutboxStatus.DEAD_LETTER] == 1
+    assert store.counts()[OutboxStatus.PENDING] == 2
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("corruption", ("timestamp", "status", "counter"))
 async def test_worker_quarantines_structurally_corrupt_rows(
     tmp_path: Path,
@@ -501,6 +566,11 @@ async def test_worker_attempt_budget_is_total_provider_call_budget(tmp_path: Pat
 
     assert summary.claimed == transport.calls == 3
     assert summary.dead_lettered == 1
+    assert [(request.retry_count, request.max_retries) for request in transport.payloads] == [
+        (0, 2),
+        (0, 2),
+        (0, 2),
+    ]
 
 
 def test_worker_configuration_is_bounded(tmp_path: Path) -> None:

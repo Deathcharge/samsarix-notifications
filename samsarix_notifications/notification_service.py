@@ -124,6 +124,22 @@ class NotificationService:
             return await self._execute(payload)
         return await self._send_idempotent(payload)
 
+    async def _send_without_retries(self, payload: NotificationPayload) -> DeliveryResult:
+        """Send one unchanged payload with the dispatcher's retry loop disabled."""
+
+        if not isinstance(payload, NotificationPayload):
+            raise NotificationValidationError("payload must be a NotificationPayload")
+        if self._closed:
+            return self._failure_result(
+                payload,
+                started_at=utc_now(),
+                attempts=0,
+                code="service_closed",
+                message="Notification service is closed",
+                retryable=False,
+            )
+        return await self._execute(payload, maximum_retries=0)
+
     async def send_batch(
         self,
         payloads: Sequence[NotificationPayload],
@@ -222,7 +238,12 @@ class NotificationService:
                 return replace(existing, deduplicated=True)
         return result
 
-    async def _execute(self, payload: NotificationPayload) -> DeliveryResult:
+    async def _execute(
+        self,
+        payload: NotificationPayload,
+        *,
+        maximum_retries: int | None = None,
+    ) -> DeliveryResult:
         started_at = utc_now()
         transport = self._transports.get(str(payload.channel))
         if transport is None:
@@ -239,6 +260,8 @@ class NotificationService:
 
         available_retries = max(0, payload.max_retries - payload.retry_count)
         max_retries = min(available_retries, self.retry_policy.max_retries)
+        if maximum_retries is not None:
+            max_retries = min(max_retries, maximum_retries)
         last_error = DeliveryError("Delivery failed", code="delivery_failed")
         attempts = 0
         async with self._semaphore:
