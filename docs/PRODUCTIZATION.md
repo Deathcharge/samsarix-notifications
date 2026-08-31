@@ -94,6 +94,14 @@ Baseline revision: `1a4acb0abac0e66ab821cfae0bd1978e2b05ab05` on clean `main`, m
 - The durable example used a stand-in transport and wheel verification only imported a module; the real reference consumer now runs from installed artifacts across fresh worker processes.
 - The living product record was stale after PR #3; this revision reconciles persistence, costs, release evidence, and remaining gates.
 
+### Direct-delivery lifecycle follow-up
+
+On baseline `98262db`, all 16 existing dispatcher tests passed, but two new regression tests failed: cancelling the sole idempotent waiter left its completed task in `_inflight`, and `aclose()` closed a transport before its accepted send completed. These were locally actionable lifecycle defects, not external release gates.
+
+The lifecycle increment moves completion/cache bookkeeping to delivery-owned callbacks, tracks and caps all accepted running/queued operations, and returns a retryable zero-attempt `service_busy` result at capacity. Shutdown refuses new admissions, drains accepted tasks, then attempts cleanup for every currently registered unique transport. Concurrent or cancelled shutdown waiters share one cleanup task. Drain/cleanup grace expiration is explicit and does not imply provider non-delivery. Eager asyncio task factories cannot invoke custom transports before admission records are published.
+
+Validation includes cancelled owners and duplicates, released capacity after queued/pre-start cancellation, failed detached retries, shutdown timeouts, concurrent close, closer failures, and actual HTTP acceptance after request cancellation. The original two reproductions now pass. This follows [Python's documented task ownership and cancellation semantics](https://docs.python.org/3/library/asyncio-task.html), not an assumption that cancellation forcibly stops threads or custom non-cooperative code.
+
 ### P2
 
 - Add opt-in adapters for specific providers only after real user demand.
@@ -117,6 +125,7 @@ Baseline revision: `1a4acb0abac0e66ab821cfae0bd1978e2b05ab05` on clean `main`, m
 - [x] Add durable SQLite delivery and bounded queue backpressure.
 - [x] Prove an order-confirmation reference consumer across real HTTP failure and worker restart.
 - [x] Add a versioned event fixture and exercise the journey from installed wheels in CI.
+- [x] Reproduce and fix direct-delivery task retention, bounded admission, and shutdown ordering.
 - [ ] Obtain an external consumer pilot and bounded live-provider acceptance evidence (owner-coordinated).
 
 ## Release acceptance criteria
@@ -162,6 +171,10 @@ Environment: fresh `.venv`, Windows, Python 3.14.7. Commands are run through `.v
 
 ## Completed work
 
+### Lifecycle verification (2026-08-31)
+
+On Windows/Python 3.14.7, `python -m pytest --cov=samsarix_notifications --cov-report=term-missing` passed **154 tests at 94.85% branch-aware coverage**. `python -m ruff format --check .`, `python -m ruff check .`, and strict `python -m mypy` passed (21 files). Both `python -I examples/local_webhook.py` and `python -I examples/durable_outbox.py` passed after the lifecycle changes. The lifecycle suite includes one eager-task-factory test that is intentionally skipped on Python 3.10/3.11, where that facility does not exist. Exact-head distribution hashes, wheel-only verification, and hosted Python-version results are recorded in the lifecycle PR.
+
 The repository now has real SMTP and webhook transports; explicit results and stable error codes; bounded retry, timeout, concurrency, batch, history, idempotency, attachment, JSON, outbox backlog, and alert behavior; durable SQLite recovery; and truthful custom-channel extensibility. It has deterministic tests, real localhost reference consumers, supported-version CI, modern single-source packaging, and release documentation. Ordinary targeted code review and regression tests cover this increment; the interrupted app-backed scan is not claimed as a completed security audit. No known locally actionable P0 remains, but this is not a certification of security or production deployment.
 
 **Disposition:** release candidate, subject to the registry gate below. The package is independently useful now; no hosted Samsarix service or adjacent repository is required.
@@ -182,6 +195,7 @@ The repository now has real SMTP and webhook transports; explicit results and st
 - The row cap is not a filesystem-byte quota. SQLite free pages, journals, application tables, and backups use additional space. Purging delivered rows also removes their durable deduplication history; never purge earlier than the business replay window.
 - Notification content and recipient identifiers remain in application memory while being sent; provider privacy terms remain the operator's responsibility.
 - Retries can duplicate an external effect when a provider accepts work but the acknowledgement is lost. Callers should supply idempotency keys and providers should deduplicate when possible.
+- Shutdown grace periods require cooperative transports and a running event loop. Cancelling an SMTP waiter cannot stop a thread already communicating with the provider. Direct idempotency still depends on correct key scoping; different semantic requests must not share a key.
 
 ## Distribution and sustainability
 

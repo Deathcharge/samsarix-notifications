@@ -33,6 +33,7 @@ Competitive direction:
 - DNS rebinding and ambiguous acknowledgement/retry duplication cannot be eliminated at this layer.
 - No owner-authorized live SMTP or production webhook smoke, published package, release tag, or downstream consumer evidence exists.
 - Direct in-memory idempotency does not compare payload fingerprints; the durable outbox does and rejects semantic conflicts.
+- Direct-delivery lifecycle now owns accepted tasks, bounds running/queued work, retains success after request cancellation, and drains before shared transport cleanup. A request disconnect is covered by deterministic tests and a real loopback-HTTP journey; this is not process-crash durability or a hard process-kill deadline.
 - Next highest-value release gate is owner-coordinated validation: register the PyPI publisher, select one consumer pilot and its retention/replay policy, and authorize bounded live-provider smokes. More adapters or a hosted UI are not prerequisites for evaluating this library.
 
 ## Samsarix adoption

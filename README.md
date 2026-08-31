@@ -153,10 +153,36 @@ asyncio.run(main())
 - Retries are capped at three by default and ten by hard validation. At worst, one request performs `1 + max_retries` provider attempts.
 - Batches are capped at 1,000 payloads by default and 10,000 by hard validation; transport concurrency remains independently bounded.
 - A supplied idempotency key deduplicates successful and in-flight sends within one `NotificationService` process.
+- Accepted running and queued deliveries are capped separately by `max_pending_deliveries` (default 1,000). At capacity, a new operation returns retryable `service_busy` with zero attempts; a matching in-flight or cached idempotent request can still reuse its result.
 - Delivery results expose whether a final failure remains retryable, allowing a durable caller to make an explicit reschedule decision.
 - Direct-delivery history and idempotency caches are bounded and process-local. `SQLiteOutbox` adds optional crash-safe, cross-process persistence with at-least-once delivery semantics.
 - Batch results preserve input order and duplicate recipients.
 - Cancellation propagates for ordinary sends. An in-flight idempotent send is shielded so a cancelled waiter cannot cause another caller to repeat an ambiguous external side effect.
+- Completed idempotent operations move into the bounded success cache and release their task references even when every waiter has been cancelled. Failed or cancelled operations release the key for a later explicit retry.
+
+### Application shutdown and backpressure
+
+Keep one `NotificationService` in a single application's event loop, stop submitting work before shutdown, and always await `aclose()` (or use the async context manager). The service is not thread-safe or intended to be shared across event loops. Application request cancellation is not process-crash durability; use the SQLite outbox when work must survive a restart.
+
+```python
+async def deliver_batch(webhook, payloads):
+    async with NotificationService(
+        transports={"webhook": webhook},
+        concurrency_limit=10,
+        max_pending_deliveries=1000,
+        shutdown_timeout_seconds=30,
+    ) as notifications:
+        # Preserve every result for the caller's bounded retry/durable policy.
+        return await notifications.send_batch(payloads)
+```
+
+`pending_deliveries` reports accepted logical deliveries, including those waiting for a concurrency slot. It does not count duplicate callers awaiting the same operation, and it is not a byte quota. The host should also bound request concurrency and content sizes. `max_pending_deliveries` must be an integer from 1 to 100,000.
+
+Shutdown immediately rejects new sends with `service_closed`, allows accepted work to drain, and only then closes each currently registered unique transport. All shutdown callers await the same cleanup, even if an earlier waiter was cancelled. Drain and transport-cleanup phases each get `shutdown_timeout_seconds` (greater than zero, at most 300; default 30). When a phase expires, remaining tasks are cancelled and `aclose()` raises `NotificationError` with code `shutdown_timeout`. A failing closer does not prevent the other closers from being attempted; failures are reported as `transport_close_failed` without provider exception content. Repeating `aclose()` observes the same outcome rather than closing transports twice.
+
+These are cooperative grace periods, not process-kill guarantees: custom `send`/`aclose` methods must avoid blocking the event loop and must propagate cancellation after cleanup. Python may wait beyond a timeout for cancellation to finish; see [asyncio cancellation and timeouts](https://docs.python.org/3/library/asyncio-task.html#timeouts). SMTP work already running in a thread cannot be forcibly stopped by cancelling an async waiter. A timeout or cancellation can therefore leave an ambiguous external effect—never infer that nothing was delivered or retry blindly. Completed-cache entries are cleared on close; bounded result history remains available for inspection.
+
+Direct idempotency keys are scoped to the service instance and do not compare payload content. Use distinct keys for different tenants, recipients, channels, or operations; do not reuse one key for changed content. The durable outbox separately checks semantic fingerprints and rejects conflicting reuse.
 
 Register a custom channel by implementing one async method:
 
@@ -236,7 +262,7 @@ direct provider attempts <= requested notifications * (1 + configured max_retrie
 durable provider attempts <= queued notifications * configured max_delivery_attempts
 ```
 
-The defaults cap concurrent deliveries at 10, batch inputs at 1,000, and direct-send attempts at four per notification. `OutboxWorker` makes exactly one provider call per durable attempt, disabling the dispatcher's inner retry loop so the worker budget is the authoritative total. A distributed rate limiter, provider receipt polling, subscriber preferences, and billing controls remain outside this package's scope.
+The defaults cap concurrent deliveries at 10, accepted running/queued operations at 1,000, batch inputs at 1,000, and direct-send attempts at four per notification. `OutboxWorker` makes at most one provider call per durable attempt, disabling the dispatcher's inner retry loop so the worker budget bounds the total. A distributed rate limiter, provider receipt polling, subscriber preferences, and billing controls remain outside this package's scope.
 
 ## Release, support, and license
 
