@@ -4,6 +4,8 @@ All notable changes will be documented here. The project follows semantic versio
 
 ## 0.1.0 - Unreleased
 
+- Verify installed-wheel tests and examples on representative Linux, Windows, and macOS runners, with an explicit HTTPX 0.27.0 compatibility job.
+- Document the exact owner-controlled package publication and independent-pilot acceptance handoff.
 - Reject conflicting direct idempotency keys with zero transport attempts; fingerprint delivery intent without retaining completed message content.
 - Snapshot accepted idempotent payloads, including nested metadata and email attachments, and bound identity processing before dispatch.
 - Verify conflict behavior through real localhost HTTP, the SMTP interface, cancelled callers, and bounded cache eviction.

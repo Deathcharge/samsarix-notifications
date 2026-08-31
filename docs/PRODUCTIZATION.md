@@ -135,6 +135,7 @@ The fix returns non-retryable, zero-attempt `idempotency_conflict` before waitin
 - [x] Reproduce and fix direct-delivery task retention, bounded admission, and shutdown ordering.
 - [x] Add unpublished release-candidate validation with an artifact round trip and wheel-only execution of the sdist tests/examples.
 - [x] Reject direct idempotency intent conflicts and isolate admitted keyed payloads from later caller mutation.
+- [x] Add continuous representative Linux/Windows/macOS wheel tests and an explicit HTTPX lower-bound job.
 - [ ] Obtain an external consumer pilot and bounded live-provider acceptance evidence (owner-coordinated).
 
 ## Release acceptance criteria
@@ -145,6 +146,7 @@ The fix returns non-retryable, zero-attempt `idempotency_conflict` before waitin
 - SMTP and webhook transports have deterministic interface-level tests, including failure and retry cases.
 - Ruff formatting/lint, strict mypy, tests with at least 90% branch coverage, build, Twine metadata check, and wheel smoke import all pass.
 - CI runs the meaningful checks on supported Python versions.
+- Representative Windows/macOS jobs and the declared HTTPX lower bound pass the full installed-wheel suite and both consumer examples.
 - The release workflow validates downloaded distributions without a checkout; pull-request and manual candidate runs skip the protected publish job.
 - No built-in transport reports success without provider acceptance.
 - Webhook private-address, redirect, payload-limit, timeout, and signature behavior is covered.
@@ -181,6 +183,12 @@ Environment: fresh `.venv`, Windows, Python 3.14.7. Commands are run through `.v
 
 ## Completed work
 
+### Compatibility verification (2026-08-31)
+
+The audit found that OS-independent package metadata and the HTTPX `>=0.27` lower bound exceeded continuous verification: hosted CI covered Linux with current resolved dependencies, while Windows had only local evidence. CI now adds Windows/macOS Python 3.14 jobs and a Linux/Python 3.10 HTTPX 0.27.0 job without replacing the five existing Linux version checks. Every matrix job runs `pip check`, the source checks/build, and the full suite plus both examples against a non-editable wheel outside the checkout. The portable wheel step uses Python subprocess argument lists and platform-specific virtual-environment executable paths; it does not assume Unix paths on Windows.
+
+Local execution of the exact portable wheel step on Windows/Python 3.14.7 with HTTPX 0.27.0 passed 203 tests, both examples, and dependency consistency. Ruff formatting/lint, strict mypy (23 files), and actionlint 1.7.12 passed. Hosted OS/version/dependency results and artifact identity are recorded in the corresponding PR. This tests representative platforms and the direct HTTPX floor, not every version combination or every transitive dependency minimum. Owner publication/provider/pilot actions are specified below and remain unexecuted.
+
 ### Direct-idempotency verification (2026-08-31)
 
 On Windows/Python 3.14.7, the complete suite passed **203 tests at 95.26% branch-aware coverage**; Ruff formatting/lint, strict mypy (23 files), both isolated localhost examples, and actionlint 1.7.12 also passed. The two baseline failures now pass. New tests cover every compared field in both cached and active states, ID/timestamp regeneration, mapping order, type/framing distinctions, nested snapshot isolation, binary/object attachments through the SMTP interface, real HTTP conflicts after caller cancellation, cache eviction, cleanup, unsupported values, and resource bounds. Exact-head distribution and hosted-CI evidence belongs to the corresponding PR. Durable schema/fingerprint semantics are unchanged.
@@ -207,6 +215,16 @@ The repository now has real SMTP and webhook transports; explicit results and st
 - **Credentials/providers:** live SMTP and production webhook smoke tests require owner-supplied endpoints and would create external side effects. Local fakes and a localhost end-to-end receiver cover the interfaces without cost.
 - **Adoption:** select a real application owner, consent/authorization policy, retention window, and acceptable delivery latency before a production pilot. The reference consumer cannot establish external demand or independently owned compatibility.
 - **Portfolio:** no changes to another Samsarix repository are required.
+
+### Owner release and pilot handoff
+
+These are the remaining external gates, not permission to publish or contact providers automatically. No credentials belong in commits, artifacts, public issues, or chat transcripts.
+
+1. **PyPI identity:** sign in as the intended package owner and open **Account settings → Publishing → Add a new pending publisher → GitHub**. Enter project `samsarix-notifications`, owner `Deathcharge`, repository `samsarix-notifications`, workflow filename `release.yml` (not its path), and environment `pypi`. Verify that the pending-publisher entry displays those exact values. Pending publishers do not reserve a package name; recheck ownership before first publication. See [PyPI's pending-publisher guide](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/).
+2. **Candidate approval:** run `gh workflow run release.yml --ref main`, open the resulting Actions run, and retain the commit SHA, wheel/sdist hashes, and `python-package-distributions` artifact before its seven-day expiry. Confirm build and downloaded-artifact jobs passed and publishing was skipped. Confirm the `pypi` environment still requires owner review. A green manual run does not test the registry's OIDC exchange.
+3. **Explicit publication decision:** only after identity, candidate, and owner approval, publish the GitHub Release for a tested commit using the version-matched tag (`v0.1.0` for the current package). Approve that run's `pypi` environment only after its build/artifact validation. Verify the public package/version, file hashes, and provenance against that release run, then test registry installation in a fresh environment. Do not rewrite an already published version or silently claim the pending publisher was exercised by CI; no registry publication has been attempted here.
+4. **Bounded provider acceptance:** supply an explicitly approved test recipient and SMTP configuration (`SMTP_HOST`, integer `SMTP_PORT`, `SMTP_USERNAME`, secret `SMTP_PASSWORD`, and authorized `SMTP_FROM`) and/or an owned HTTPS webhook URL with an exact allowed hostname. Agree to one synthetic notification per selected transport, no automatic retries (`RetryPolicy(max_retries=0)` and payload `max_retries=0`), a unique operation key, and a repeat of that same key to verify cached deduplication without another provider call. Record a sanitized result and receiver/provider receipt. After a timeout, inspect provider receipts before any resend; acceptance may be ambiguous. SMTP acceptance is not an inbox-delivery claim, nor is HTTP 2xx a downstream-processing claim.
+5. **Independent pilot:** name an application owner and test environment; record the tested wheel hash, public API/event fixture, expected delivery latency and volume, consent/authorization policy, tenant-scoped key strategy, replay/retention window, outbox row/disk budget, and rollback owner. Reproduce commit/rollback, provider failure/recovery, worker restart, duplicate suppression, dead-letter inspection/requeue, and shutdown. Record actual observations against those agreed criteria. Stop the worker on an unexpected recipient or duplication and preserve the database for owner-controlled inspection. The repository-owned order example proves its technical contract, not this independently owned acceptance.
 
 ## Known risks
 
