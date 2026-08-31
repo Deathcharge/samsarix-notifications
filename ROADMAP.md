@@ -6,7 +6,7 @@ This roadmap separates four gates: merge, release, publication, and flagship ado
 
 Portfolio role: **reusable library or sdk**. Keep this as a small, independently versioned package. Samsarix Unified should consume it only through a public API adapter; private monorepo imports and copied implementations are out of scope.
 
-Current disposition: the productized Samsarix foundation, durable SQLite outbox, consumer contracts, bounded delivery lifecycle, unpublished artifact validation, and direct-idempotency consistency are merged on `main` (PRs #2–#7). The compatibility increment adds representative cross-platform installed-wheel verification and the HTTPX lower-bound job. Release, publication, and downstream adoption remain separate decisions.
+Current disposition: the productized Samsarix foundation, durable SQLite outbox, consumer contracts, bounded delivery lifecycle, unpublished artifact validation, direct-idempotency consistency, and compatibility matrix are merged on `main` (PRs #2–#8). The configuration increment rejects invalid numeric/boolean settings early with typed errors. Release, publication, and downstream adoption remain separate decisions.
 
 ## Stabilize the productized default
 

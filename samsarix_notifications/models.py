@@ -10,6 +10,7 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
+from ._validation import is_bounded_int, is_bounded_number
 from .errors import NotificationValidationError
 
 
@@ -80,10 +81,10 @@ class NotificationPayload:
 
         if self.priority not in {"low", "normal", "high", "urgent"}:
             raise NotificationValidationError("priority must be one of: low, normal, high, urgent")
-        if not isinstance(self.retry_count, int) or not 0 <= self.retry_count <= 10:
-            raise NotificationValidationError("retry_count must be between 0 and 10")
-        if not isinstance(self.max_retries, int) or not 0 <= self.max_retries <= 10:
-            raise NotificationValidationError("max_retries must be between 0 and 10")
+        if not is_bounded_int(self.retry_count, 0, 10):
+            raise NotificationValidationError("retry_count must be an integer between 0 and 10")
+        if not is_bounded_int(self.max_retries, 0, 10):
+            raise NotificationValidationError("max_retries must be an integer between 0 and 10")
         if self.retry_count > self.max_retries:
             raise NotificationValidationError("retry_count cannot exceed max_retries")
         if self.idempotency_key is not None:
@@ -166,25 +167,27 @@ class RetryPolicy:
     attempt_timeout_seconds: float = 15.0
 
     def __post_init__(self) -> None:
-        if not 0 <= self.max_retries <= 10:
-            raise NotificationValidationError("max_retries must be between 0 and 10")
-        if not 0 <= self.base_delay_seconds <= 60:
+        if not is_bounded_int(self.max_retries, 0, 10):
+            raise NotificationValidationError("max_retries must be an integer between 0 and 10")
+        if not is_bounded_number(self.base_delay_seconds, 0, 60):
             raise NotificationValidationError("base_delay_seconds must be between 0 and 60")
-        if not 0 <= self.max_delay_seconds <= 300:
+        if not is_bounded_number(self.max_delay_seconds, 0, 300):
             raise NotificationValidationError("max_delay_seconds must be between 0 and 300")
         if self.max_delay_seconds < self.base_delay_seconds:
             raise NotificationValidationError(
                 "max_delay_seconds cannot be less than base_delay_seconds"
             )
-        if not 0 < self.attempt_timeout_seconds <= 300:
+        if not is_bounded_number(self.attempt_timeout_seconds, 0, 300, exclusive_minimum=True):
             raise NotificationValidationError("attempt_timeout_seconds must be between 0 and 300")
 
     def delay_before_retry(self, retry_number: int) -> float:
         """Return deterministic exponential backoff for a one-based retry."""
 
+        if not is_bounded_int(retry_number, 1, 10):
+            raise NotificationValidationError("retry_number must be an integer between 1 and 10")
         return min(
             self.max_delay_seconds,
-            self.base_delay_seconds * float(2 ** max(0, retry_number - 1)),
+            self.base_delay_seconds * float(2 ** (retry_number - 1)),
         )
 
 

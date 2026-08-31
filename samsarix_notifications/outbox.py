@@ -17,6 +17,7 @@ from typing import Any, cast
 from uuid import uuid4
 
 from ._json import encode_json
+from ._validation import is_bounded_int, is_bounded_number
 from .errors import NotificationValidationError, OutboxConflictError, OutboxLeaseError
 from .models import DeliveryResult, NotificationPayload, utc_now
 from .notification_service import NotificationService
@@ -126,10 +127,12 @@ class SQLiteOutbox:
                 "outbox database must be a persistent SQLite path",
                 code="invalid_outbox_database",
             )
-        if not 0 < busy_timeout_seconds <= 300:
+        if not is_bounded_number(busy_timeout_seconds, 0, 300, exclusive_minimum=True):
             raise NotificationValidationError("busy_timeout_seconds must be between 0 and 300")
-        if type(max_messages) is not int or not 1 <= max_messages <= 1_000_000:
+        if not is_bounded_int(max_messages, 1, 1_000_000):
             raise NotificationValidationError("max_messages must be an integer from 1 to 1000000")
+        if type(initialize) is not bool:
+            raise NotificationValidationError("initialize must be a boolean")
         self.database = path
         self.busy_timeout_seconds = busy_timeout_seconds
         self.max_messages = max_messages
@@ -285,8 +288,8 @@ class SQLiteOutbox:
     ) -> tuple[OutboxMessage, ...]:
         """List messages in enqueue order with a hard result bound."""
 
-        if not 1 <= limit <= 10_000:
-            raise NotificationValidationError("limit must be between 1 and 10000")
+        if not is_bounded_int(limit, 1, 10_000):
+            raise NotificationValidationError("limit must be an integer between 1 and 10000")
         query = f"SELECT * FROM {_TABLE}"
         parameters: tuple[object, ...] = ()
         if status is not None:
@@ -358,8 +361,8 @@ class SQLiteOutbox:
         """Delete old delivered messages in a bounded transaction."""
 
         cutoff = _normalized_time(before, name="before")
-        if not 1 <= limit <= 10_000:
-            raise NotificationValidationError("limit must be between 1 and 10000")
+        if not is_bounded_int(limit, 1, 10_000):
+            raise NotificationValidationError("limit must be an integer between 1 and 10000")
         with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             cursor = connection.execute(
@@ -669,13 +672,18 @@ class OutboxWorker:
             raise NotificationValidationError("outbox must be a SQLiteOutbox")
         if not isinstance(service, NotificationService):
             raise NotificationValidationError("service must be a NotificationService")
-        if not 1 <= lease_seconds <= 86_400:
+        if not is_bounded_number(lease_seconds, 1, 86_400):
             raise NotificationValidationError("lease_seconds must be between 1 and 86400")
-        if not 1 <= max_delivery_attempts <= 100:
-            raise NotificationValidationError("max_delivery_attempts must be between 1 and 100")
-        if not 0 <= base_delay_seconds <= 3_600:
+        if not is_bounded_int(max_delivery_attempts, 1, 100):
+            raise NotificationValidationError(
+                "max_delivery_attempts must be an integer from 1 to 100"
+            )
+        if not is_bounded_number(base_delay_seconds, 0, 3_600):
             raise NotificationValidationError("base_delay_seconds must be between 0 and 3600")
-        if not base_delay_seconds <= max_delay_seconds <= 86_400:
+        if (
+            not is_bounded_number(max_delay_seconds, 0, 86_400)
+            or max_delay_seconds < base_delay_seconds
+        ):
             raise NotificationValidationError(
                 "max_delay_seconds must be between base_delay_seconds and 86400"
             )
@@ -691,8 +699,8 @@ class OutboxWorker:
     async def run_once(self, *, limit: int = 100) -> OutboxRunResult:
         """Deliver up to ``limit`` currently available messages."""
 
-        if not 1 <= limit <= 10_000:
-            raise NotificationValidationError("limit must be between 1 and 10000")
+        if not is_bounded_int(limit, 1, 10_000):
+            raise NotificationValidationError("limit must be an integer between 1 and 10000")
         claimed = delivered = rescheduled = 0
         remaining = limit
         dead_lettered = await asyncio.to_thread(
@@ -759,10 +767,10 @@ class OutboxWorker:
     ) -> None:
         """Poll until cancelled or ``stop_event`` is set."""
 
-        if not 0.01 <= poll_interval_seconds <= 300:
+        if not is_bounded_number(poll_interval_seconds, 0.01, 300):
             raise NotificationValidationError("poll_interval_seconds must be between 0.01 and 300")
-        if not 1 <= batch_size <= 10_000:
-            raise NotificationValidationError("batch_size must be between 1 and 10000")
+        if not is_bounded_int(batch_size, 1, 10_000):
+            raise NotificationValidationError("batch_size must be an integer between 1 and 10000")
         while stop_event is None or not stop_event.is_set():
             result = await self.run_once(limit=batch_size)
             if result.claimed:

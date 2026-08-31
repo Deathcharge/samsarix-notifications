@@ -183,6 +183,14 @@ Environment: fresh `.venv`, Windows, Python 3.14.7. Commands are run through `.v
 
 ## Completed work
 
+### Configuration validation (2026-08-31)
+
+On baseline `e3b545b`, three new regression tests failed: `RetryPolicy(max_retries=0.5)` was accepted until later retry iteration, a dispatcher mapping silently truncated `concurrency_limit=1.5`, and `list_messages(limit=1.5)` reached SQLite and raised a raw database error. These are closed P1 input-contract defects, not provider failures.
+
+Shared private predicates now require native integers for counts/ports/byte limits, finite native integers or floats for durations, and native booleans for SMTP TLS flags, webhook private-address configuration, and outbox initialization. They reject unsupported objects without invoking numeric conversion/comparison hooks. Public one-based retry numbers are bounded before exponentiation. Mapping and keyword inputs follow the same rules; existing valid bounds, fractional durations, zero-budget options, error classes/codes, database schema, and dependencies are unchanged. Numeric-string coercion in pre-release dispatcher mappings is intentionally removed and documented in the README.
+
+Local Windows/Python 3.14.7 verification: **251 tests passed at 95.67% branch-aware coverage**, including 48 configuration tests covering wrong types, non-finite numbers, lower/upper bounds, stable typed errors, and rejection before database creation/access. Ruff formatting/lint and strict mypy (25 files) passed. The `42ba733` wheel also passed all 251 sdist tests, both examples, and `pip check` in a fresh environment outside the checkout with isolated imports and HTTPX 0.27.0. Exact-head artifact and hosted compatibility results are recorded in the corresponding PR after execution; these checks do not exercise live providers or establish a completed independent security audit.
+
 ### Compatibility verification (2026-08-31)
 
 The audit found that OS-independent package metadata and the HTTPX `>=0.27` lower bound exceeded continuous verification: hosted CI covered Linux with current resolved dependencies, while Windows had only local evidence. CI now adds Windows/macOS Python 3.14 jobs and a Linux/Python 3.10 HTTPX 0.27.0 job without replacing the five existing Linux version checks. Every matrix job runs `pip check`, the source checks/build, and the full suite plus both examples against a non-editable wheel outside the checkout. The portable wheel step uses Python subprocess argument lists and platform-specific virtual-environment executable paths; it does not assume Unix paths on Windows.

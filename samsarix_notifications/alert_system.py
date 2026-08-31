@@ -10,6 +10,7 @@ from enum import Enum
 from threading import RLock
 from typing import Any
 
+from ._validation import is_bounded_int
 from .errors import NotificationValidationError
 from .models import utc_now
 
@@ -58,8 +59,8 @@ class AlertSystem:
     """Store a bounded set of active alerts in the current process."""
 
     def __init__(self, *, max_alerts: int = 10_000) -> None:
-        if not 1 <= max_alerts <= 1_000_000:
-            raise NotificationValidationError("max_alerts must be between 1 and 1000000")
+        if not is_bounded_int(max_alerts, 1, 1_000_000):
+            raise NotificationValidationError("max_alerts must be an integer between 1 and 1000000")
         self.alerts: dict[str, Alert] = {}
         self.escalation_policies: dict[str, list[str]] = {}
         self._max_alerts = max_alerts

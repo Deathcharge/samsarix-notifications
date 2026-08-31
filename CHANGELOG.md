@@ -4,6 +4,9 @@ All notable changes will be documented here. The project follows semantic versio
 
 ## 0.1.0 - Unreleased
 
+- Validate native integer counts/ports, finite numeric durations, and boolean configuration flags consistently before delivery or database work.
+- Remove implicit dispatcher count coercion and reject invalid public retry numbers before calculating backoff; preserve valid defaults and bounds.
+- Cover configuration boundaries, stable error codes, mapping/keyword parity, and no-I/O failure behavior with 48 focused tests.
 - Verify installed-wheel tests and examples on representative Linux, Windows, and macOS runners, with an explicit HTTPX 0.27.0 compatibility job.
 - Document the exact owner-controlled package publication and independent-pilot acceptance handoff.
 - Reject conflicting direct idempotency keys with zero transport attempts; fingerprint delivery intent without retaining completed message content.
