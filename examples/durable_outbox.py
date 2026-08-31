@@ -14,8 +14,10 @@ import json
 import sqlite3
 import subprocess
 import sys
+import time
 from contextlib import closing
 from dataclasses import asdict
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -74,6 +76,7 @@ def start_worker(database: Path, port: int) -> dict[str, int]:
 def demonstrate(database: Path) -> dict[str, object]:
     attempts: list[dict[str, object]] = []
     accepted: list[dict[str, object]] = []
+    received_at: list[datetime] = []
 
     class Receiver(BaseHTTPRequestHandler):
         def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
@@ -84,11 +87,14 @@ def demonstrate(database: Path) -> dict[str, object]:
                 return
             event = json.loads(self.rfile.read(length))
             attempts.append(event)
+            received_at.append(datetime.now(timezone.utc))
             # Model a temporary provider outage, then acceptance after restart.
             status = 503 if len(attempts) == 1 else 202
             if status == 202:
                 accepted.append(event)
             self.send_response(status)
+            if status == 503:
+                self.send_header("Retry-After", "1")
             self.send_header("X-Request-ID", "order-consumer-v1")
             self.send_header("Content-Length", "0")
             self.end_headers()
@@ -131,8 +137,13 @@ def demonstrate(database: Path) -> dict[str, object]:
         assert first == {"claimed": 1, "delivered": 0, "rescheduled": 1, "dead_lettered": 0}
         assert pending is not None and pending.status is OutboxStatus.PENDING
         assert pending.attempt_count == 1 and pending.last_error_code == "webhook_http_error"
+        assert pending.available_at >= received_at[0] + timedelta(seconds=1)
         assert not accepted
 
+        # The worker has exited; the deadline is committed in SQLite, not an
+        # in-memory sleep. Wait only for this localhost example's one-second hint.
+        remaining = (pending.available_at - datetime.now(timezone.utc)).total_seconds()
+        time.sleep(min(1, max(0, remaining)))
         second = start_worker(database, port)
         stored = SQLiteOutbox(database).get(notification.notification_id)
         assert second == {"claimed": 1, "delivered": 1, "rescheduled": 0, "dead_lettered": 0}
@@ -146,9 +157,11 @@ def demonstrate(database: Path) -> dict[str, object]:
         expected = json.loads(CONTRACT.read_text(encoding="utf-8"))
         assert attempts == [expected, expected]
         assert accepted == [expected]
+        assert received_at[1] - received_at[0] >= timedelta(seconds=1)
         return {
             "contract": "order_confirmed_v1",
             "rollback_verified": True,
+            "retry_after_respected": True,
             "worker_processes": 2,
             "http_attempts": len(attempts),
             "accepted_events": len(accepted),

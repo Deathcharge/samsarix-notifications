@@ -18,9 +18,10 @@ from uuid import uuid4
 import httpx
 
 from ._json import encode_json
+from ._retry_after import parse_retry_after
 from ._validation import is_bounded_int, is_bounded_number
 from .errors import ConfigurationError, DeliveryError, NotificationValidationError
-from .models import NotificationPayload, TransportResult
+from .models import NotificationPayload, TransportResult, utc_now
 
 Resolver = Callable[[str, int], Awaitable[Sequence[str]]]
 _EVENT_TYPE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
@@ -202,6 +203,7 @@ class WebhookRouter:
             ) as response:
                 status = response.status_code
                 provider_id = response.headers.get("X-Request-ID")
+                retry_after = response.headers.get("Retry-After")
         except httpx.TimeoutException as exc:
             raise DeliveryError(
                 "Webhook request timed out", code="webhook_timeout", retryable=True
@@ -212,10 +214,12 @@ class WebhookRouter:
             ) from exc
         if not 200 <= status < 300:
             retryable = status in {408, 425, 429} or status >= 500
+            delay = parse_retry_after(retry_after, now=utc_now()) if retryable else None
             raise DeliveryError(
                 f"Webhook destination returned HTTP {status}",
                 code="webhook_http_error",
                 retryable=retryable,
+                retry_after_seconds=delay,
             )
         if provider_id is not None:
             provider_id = provider_id[:128]

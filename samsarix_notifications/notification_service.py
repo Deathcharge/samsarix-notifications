@@ -419,7 +419,14 @@ class NotificationService:
                         retryable=True,
                     )
                 except NotificationError as exc:
-                    last_error = DeliveryError(str(exc), code=exc.code, retryable=exc.retryable)
+                    last_error = DeliveryError(
+                        str(exc),
+                        code=exc.code,
+                        retryable=exc.retryable,
+                        retry_after_seconds=(
+                            exc.retry_after_seconds if isinstance(exc, DeliveryError) else None
+                        ),
+                    )
                 except Exception:
                     last_error = DeliveryError(
                         "Transport raised an unexpected error",
@@ -428,7 +435,15 @@ class NotificationService:
                     )
                 if not last_error.retryable or attempt >= max_retries:
                     break
-                await self._sleep(self.retry_policy.delay_before_retry(attempt + 1))
+                delay = max(
+                    self.retry_policy.delay_before_retry(attempt + 1),
+                    last_error.retry_after_seconds or 0,
+                )
+                # A provider minimum must not be clamped into an early retry.
+                # Return the hint for durable/caller-owned scheduling instead.
+                if delay > self.retry_policy.max_delay_seconds:
+                    break
+                await self._sleep(delay)
 
         result = self._failure_result(
             payload,
@@ -437,6 +452,7 @@ class NotificationService:
             code=last_error.code,
             message=str(last_error),
             retryable=last_error.retryable,
+            retry_after_seconds=last_error.retry_after_seconds,
         )
         self._record(result)
         return result
@@ -450,6 +466,7 @@ class NotificationService:
         code: str,
         message: str,
         retryable: bool,
+        retry_after_seconds: float | None = None,
     ) -> DeliveryResult:
         return DeliveryResult(
             notification_id=payload.notification_id,
@@ -462,6 +479,7 @@ class NotificationService:
             error_code=code,
             error_message=message,
             retryable=retryable,
+            retry_after_seconds=retry_after_seconds,
         )
 
     def _record(self, result: DeliveryResult) -> None:

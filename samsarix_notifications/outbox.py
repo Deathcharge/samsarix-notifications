@@ -738,7 +738,10 @@ class OutboxWorker:
                 delivered += 1
             elif result.retryable and message.attempt_count < self.max_delivery_attempts:
                 available_at = utc_now() + timedelta(
-                    seconds=self._delay_before_attempt(message.attempt_count + 1)
+                    seconds=max(
+                        self._delay_before_attempt(message.attempt_count + 1),
+                        result.retry_after_seconds or 0,
+                    )
                 )
                 await asyncio.to_thread(
                     self.outbox._reschedule,
