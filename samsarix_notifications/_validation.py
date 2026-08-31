@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+MAX_RETRY_AFTER_SECONDS = 86_400
+
 
 def is_bounded_int(value: object, minimum: int, maximum: int) -> bool:
     """Require a native integer, excluding booleans and implicit conversion."""

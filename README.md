@@ -108,7 +108,7 @@ print(queued.created, queued.message.status.value)
 
 When application data uses the same SQLite database, `enqueue(..., connection=connection)` can participate in the caller's transaction. This implements the transactional-outbox boundary without making a network call while business data is locked. See [the durable outbox guide](docs/OUTBOX.md) and run `python examples/durable_outbox.py` for a complete credential-free order example.
 
-That example uses real localhost HTTP and two separate worker processes: rollback, commit, HTTP 503, restart, HTTP 202, receipt verification, and durable duplicate detection. A versioned JSON fixture checks the consumer event shape, and CI repeats the journey using an installed wheel. It is a reference consumer, not a claim of production adoption.
+That example uses real localhost HTTP and two separate worker processes: rollback, commit, HTTP 503 with `Retry-After`, a persisted retry deadline, restart, HTTP 202, receipt verification, and durable duplicate detection. A versioned JSON fixture checks the consumer event shape, and CI repeats the journey using an installed wheel. It is a reference consumer, not a claim of production adoption.
 
 The outbox defaults to 10,000 retained messages across all states. Set `max_messages` for your storage budget and schedule delivered-record retention; a full queue raises `outbox_capacity_reached` without dropping existing work. This is not a disk-byte quota. See the guide for retention, replay-window, and privacy implications.
 
@@ -157,7 +157,7 @@ Invalid numeric/boolean transport settings raise `ConfigurationError` (`invalid_
 
 `NotificationService.send()` returns a `DeliveryResult`; it does not report success until a transport accepts the message. Results include attempts, timestamps, provider status, and stable error codes. They are truthy only when delivered.
 
-- Retryable timeouts, connection errors, HTTP `408`/`425`/`429`, HTTP `5xx`, and transient SMTP responses use deterministic exponential backoff.
+- Retryable timeouts, connection errors, HTTP `408`/`425`/`429`, HTTP `5xx`, and transient SMTP responses use deterministic exponential backoff. Valid webhook `Retry-After` hints set a minimum delay, never an earlier clamped retry.
 - Retries are capped at three by default and ten by hard validation. At worst, one request performs `1 + max_retries` provider attempts.
 - Batches are capped at 1,000 payloads by default and 10,000 by hard validation; transport concurrency remains independently bounded.
 - A supplied idempotency key deduplicates matching successful and in-flight sends within one `NotificationService` process. Reusing a retained key for different delivery intent returns non-retryable `idempotency_conflict` with zero transport attempts.
@@ -167,6 +167,16 @@ Invalid numeric/boolean transport settings raise `ConfigurationError` (`invalid_
 - Batch results preserve input order and duplicate recipients.
 - Cancellation propagates for ordinary sends. An in-flight idempotent send is shielded so a cancelled waiter cannot cause another caller to repeat an ambiguous external side effect.
 - Completed idempotent operations move into the bounded success cache and release their task references even when every waiter has been cancelled. Failed or cancelled operations release the key for a later explicit retry.
+
+### Provider-directed retry delays
+
+Webhook failures preserve `Retry-After` as `DeliveryError.retry_after_seconds` and in the final `DeliveryResult`/`as_dict()` output. Integer-second headers and recognized HTTP dates are supported; past dates mean zero delay. Custom transports can raise `DeliveryError(..., retryable=True, retry_after_seconds=30)` using a finite native number from 0 to 86,400 seconds. Successes and failures without a hint use `None`.
+
+Direct delivery waits for the greater of the exponential backoff and provider hint. If that wait exceeds `RetryPolicy.max_delay_seconds`, it returns a retryable failure immediately, even if retries remain; it does **not** shorten the provider's minimum or hold the request for an unbounded wait. A caller-owned scheduler can conservatively schedule no earlier than `result.completed_at + timedelta(seconds=result.retry_after_seconds)`. The outbox does this automatically using its own backoff and persists the later `available_at`, without sleeping inside the worker or blocking other ready messages.
+
+Malformed headers of at most 128 characters fall back to local backoff. A header longer than 128 characters or a recognized delay beyond one day stops automatic retries with non-retryable `webhook_retry_after_unsupported`; durable delivery dead-letters it for operator review. This means the requested schedule is unsupported, not that the provider is permanently unavailable. Raw header values are not copied into errors.
+
+These are **per-message** delays, not a host-, tenant-, or provider-wide rate limiter. A new direct call or another queued message is not paused by a previous failure. Applications must coordinate shared quotas and respect hints when resubmitting; keep the host clock synchronized for date-based hints and durable deadlines. Existing retry budgets, lease fencing, and at-least-once limitations still apply.
 
 ### Idempotency and payload ownership
 

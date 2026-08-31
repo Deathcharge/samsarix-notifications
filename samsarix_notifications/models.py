@@ -10,7 +10,7 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
-from ._validation import is_bounded_int, is_bounded_number
+from ._validation import MAX_RETRY_AFTER_SECONDS, is_bounded_int, is_bounded_number
 from .errors import NotificationValidationError
 
 
@@ -125,6 +125,16 @@ class DeliveryResult:
     error_message: str | None = None
     deduplicated: bool = False
     retryable: bool | None = None
+    retry_after_seconds: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.retry_after_seconds is not None:
+            if not is_bounded_number(self.retry_after_seconds, 0, MAX_RETRY_AFTER_SECONDS):
+                raise NotificationValidationError("retry_after_seconds must be between 0 and 86400")
+            if self.retryable is not True or self.status is not DeliveryStatus.FAILED:
+                raise NotificationValidationError(
+                    "retry_after_seconds requires a retryable failure"
+                )
 
     @property
     def success(self) -> bool:
@@ -154,6 +164,7 @@ class DeliveryResult:
             "error_message": self.error_message,
             "deduplicated": self.deduplicated,
             "retryable": self.retryable,
+            "retry_after_seconds": self.retry_after_seconds,
         }
 
 

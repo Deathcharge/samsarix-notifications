@@ -45,7 +45,7 @@ Run the complete credential-free example with:
 python examples/durable_outbox.py
 ```
 
-The example rolls back a transaction, commits an order and notification together, then starts two independent worker processes against a real loopback HTTP receiver. The first receives HTTP 503; the restarted worker receives HTTP 202. It verifies the stored receipt and duplicate enqueue against `examples/fixtures/order_confirmed_v1.json`. Expected summary: `worker_processes=2`, `http_attempts=2`, `accepted_events=1`, `durable_status="delivered"`, `duplicate_created=false`. The consumer and data are synthetic; this does not prove production adoption or exactly-once processing. No credentials or external network calls are needed, and its temporary database is removed after the demonstration.
+The example rolls back a transaction, commits an order and notification together, then starts two independent worker processes against a real loopback HTTP receiver. The first receives HTTP 503 with `Retry-After: 1`; its retry deadline is persisted before it exits. After that deadline, the restarted worker receives HTTP 202. It verifies the requested minimum delay, stored receipt, and duplicate enqueue against `examples/fixtures/order_confirmed_v1.json`. Expected summary: `retry_after_respected=true`, `worker_processes=2`, `http_attempts=2`, `accepted_events=1`, `durable_status="delivered"`, `duplicate_created=false`. The consumer and data are synthetic; this does not prove production adoption or exactly-once processing. No credentials or external network calls are needed, and its temporary database is removed after the demonstration.
 
 ## Worker lifecycle
 
@@ -78,7 +78,7 @@ async def serve(notifications: NotificationService) -> None:
 - An expired lease is eligible for recovery by another worker after a crash.
 - Delivery is **at least once**, not exactly once. A worker can crash after the provider accepts a notification but before SQLite records success.
 - Stable idempotency keys let the outbox deduplicate across processes and restarts. Reusing a key or notification ID with different semantic content raises `OutboxConflictError` instead of silently discarding work.
-- Retryable failures return to the pending queue with bounded exponential delay. Permanent failures and exhausted delivery budgets enter `dead_letter`.
+- Retryable failures return to the pending queue with the greater of the bounded exponential delay and a supported provider retry hint. Permanent failures and exhausted delivery budgets enter `dead_letter`.
 - `requeue_dead_letter` is an explicit operator action and resets the worker-attempt budget.
 
 Choose a lease longer than the maximum expected single provider attempt. `OutboxWorker` disables the dispatcher's inner retry loop and makes at most one provider call per durable claim, so `max_delivery_attempts` bounds total provider calls. Admission or configuration failures can consume a claim without a provider call. The default five-minute lease safely exceeds the default per-attempt timeout. Provider-side idempotency is still recommended whenever the provider supports it.
@@ -88,6 +88,12 @@ When shutting down an application, stop the worker's polling/producer tasks befo
 Every claim has a fresh random lease token in addition to its worker ID. A stale attempt therefore cannot finalize a newer claim even when two processes reuse the same configured worker ID or an operator dead-letters and requeues the message. Records that fail stored-payload, timestamp, status, or counter integrity checks are moved to `dead_letter` with a generic corruption code before any transport is called; quarantines count against the requested run limit and the worker continues with healthy rows while capacity remains. Corrupt payload content remains unreadable through the normal message API and should be inspected or removed only through an application-controlled database recovery procedure.
 
 ## Scheduling and operations
+
+### Provider retry windows
+
+`DeliveryResult.retry_after_seconds` carries a supported provider minimum from 0 to 86,400 seconds. The worker persists `available_at` using the greater of that minimum and its exponential delay. `max_delay_seconds` caps the **local backoff**, not the provider's minimum. The claim is released immediately; polling/restarting before the deadline does not consume another attempt, and other ready messages can proceed. No database migration is required.
+
+Malformed short HTTP hints fall back to local backoff; oversized headers or recognized waits beyond one day produce `webhook_retry_after_unsupported` and enter `dead_letter` without further automatic attempts. Check the endpoint's retry policy before operator requeue. Exhausted budgets also dead-letter normally; the original header is not stored. This coordinates one message's retry, not a provider-wide quota, and relies on a correctly synchronized host clock. See the README for direct-send behavior and custom-transport hints.
 
 Supply a timezone-aware `available_at` to `enqueue` or `aenqueue` for delayed delivery. Use `counts` for bounded queue health, `list_messages` for inspection, and `purge_completed` to apply a retention policy to delivered records.
 

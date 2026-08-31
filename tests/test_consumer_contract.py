@@ -20,6 +20,7 @@ def test_order_consumer_contract_across_worker_process_restarts(tmp_path: Path) 
     assert json.loads(completed.stdout) == {
         "contract": "order_confirmed_v1",
         "rollback_verified": True,
+        "retry_after_respected": True,
         "worker_processes": 2,
         "http_attempts": 2,
         "accepted_events": 1,

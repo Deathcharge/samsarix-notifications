@@ -183,6 +183,14 @@ Environment: fresh `.venv`, Windows, Python 3.14.7. Commands are run through `.v
 
 ## Completed work
 
+### Provider-directed retries (2026-08-31)
+
+On baseline `3fd86ef`, two new regression tests failed: after HTTP 429 with `Retry-After: 60`, direct delivery made four immediate attempts and a zero-backoff worker claimed the same row three times in one run. This exhausted local budgets while ignoring a provider minimum. [RFC 9110 section 10.2.3](https://www.rfc-editor.org/rfc/rfc9110.html#section-10.2.3) defines integer-second/date hints, and [Slack documents HTTP 429 plus Retry-After](https://docs.slack.dev/apis/web-api/rate-limits/) for rate-limited HTTP APIs, including incoming webhooks. These sources establish a concrete interoperability need, not evidence of Samsarix customer demand or a new built-in Slack adapter.
+
+Webhook parsing now preserves supported hints on `DeliveryError` and final `DeliveryResult`, using an additive optional `retry_after_seconds` field. Direct retries wait for the greater of local backoff and provider minimum, or return a retryable failure when the wait exceeds the inline delay budget. The outbox commits the later `available_at` and releases its claim without sleeping. Parsing is bounded to 128 characters and one day: malformed short values fall back to local backoff; unsupported long waits stop automatic retries for operator review instead of being clamped early. No schema/dependency changes; existing attempt budgets remain in force. Per-message scheduling deliberately does not infer provider-wide quota groups.
+
+Local Windows/Python 3.14.7 checks passed Ruff formatting/lint, strict mypy (27 files), and **302 tests at 95.91% branch-aware coverage**, including 51 focused retry-hint tests. Review also reproduced Python email parsing's fixed-century interpretation of an RFC 850 date as a past date; the parser now applies HTTP's rolling 50-year rule, tested across the boundary and century rollover. The reference consumer receives HTTP 503 with a one-second hint, verifies its committed deadline, exits its first worker, and obtains HTTP 202 from a second worker after that deadline. Its versioned event shape is unchanged. Exact-head artifact/compatibility evidence belongs in the corresponding PR after execution. Publication, authorized provider smokes, and an independent pilot remain unexecuted external gates.
+
 ### Configuration validation (2026-08-31)
 
 On baseline `e3b545b`, three new regression tests failed: `RetryPolicy(max_retries=0.5)` was accepted until later retry iteration, a dispatcher mapping silently truncated `concurrency_limit=1.5`, and `list_messages(limit=1.5)` reached SQLite and raised a raw database error. These are closed P1 input-contract defects, not provider failures.

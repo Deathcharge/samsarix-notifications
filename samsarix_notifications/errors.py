@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from ._validation import MAX_RETRY_AFTER_SECONDS, is_bounded_number
+
 
 class NotificationError(Exception):
     """Base exception with a stable machine-readable code."""
@@ -28,7 +30,7 @@ class ConfigurationError(NotificationError):
 
 
 class DeliveryError(NotificationError):
-    """Raised by a transport when an attempted delivery is not accepted."""
+    """Transport failure, optionally with a minimum retry delay of up to one day."""
 
     def __init__(
         self,
@@ -36,8 +38,17 @@ class DeliveryError(NotificationError):
         *,
         code: str = "delivery_failed",
         retryable: bool = False,
+        retry_after_seconds: float | None = None,
     ) -> None:
+        if retry_after_seconds is not None:
+            if not is_bounded_number(retry_after_seconds, 0, MAX_RETRY_AFTER_SECONDS):
+                raise NotificationValidationError("retry_after_seconds must be between 0 and 86400")
+            if retryable is not True:
+                raise NotificationValidationError(
+                    "retry_after_seconds requires a retryable failure"
+                )
         super().__init__(message, code=code, retryable=retryable)
+        self.retry_after_seconds = retry_after_seconds
 
 
 class OutboxConflictError(NotificationError):
