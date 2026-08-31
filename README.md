@@ -108,6 +108,10 @@ print(queued.created, queued.message.status.value)
 
 When application data uses the same SQLite database, `enqueue(..., connection=connection)` can participate in the caller's transaction. This implements the transactional-outbox boundary without making a network call while business data is locked. See [the durable outbox guide](docs/OUTBOX.md) and run `python examples/durable_outbox.py` for a complete credential-free order example.
 
+That example uses real localhost HTTP and two separate worker processes: rollback, commit, HTTP 503, restart, HTTP 202, receipt verification, and durable duplicate detection. A versioned JSON fixture checks the consumer event shape, and CI repeats the journey using an installed wheel. It is a reference consumer, not a claim of production adoption.
+
+The outbox defaults to 10,000 retained messages across all states. Set `max_messages` for your storage budget and schedule delivered-record retention; a full queue raises `outbox_capacity_reached` without dropping existing work. This is not a disk-byte quota. See the guide for retention, replay-window, and privacy implications.
+
 ## SMTP email
 
 ```python
@@ -180,6 +184,7 @@ The default webhook policy:
 - does not follow redirects;
 - ignores ambient proxy environment variables;
 - applies payload, timeout, and connection limits;
+- bounds JSON traversal before encoding (32 levels, 10,000 nodes/keys, 4,096-bit integers), then enforces the encoded-byte cap;
 - can HMAC-sign registered routes with `X-Samsarix-Signature: sha256=...`.
 
 DNS validation and the later network connection are separate operations, so DNS rebinding cannot be eliminated completely by an application-layer library. Exact allowlists reduce the attacker-controlled-host case; egress firewall rules remain the strongest control for high-trust deployments. See [SECURITY.md](SECURITY.md) for trust boundaries and reporting.
@@ -210,11 +215,13 @@ python -m ruff format --check .
 python -m ruff check .
 python -m mypy
 python -m pytest --cov=samsarix_notifications --cov-report=term-missing
+python examples/local_webhook.py
+python examples/durable_outbox.py
 python -m build
 python -m twine check dist/*
 ```
 
-CI runs these checks on Python 3.10 through 3.14. The repository deliberately has no application lockfile: this is a library, and compatible runtime bounds live in `pyproject.toml`. Release artifacts should be built in an isolated environment and smoke-tested after wheel installation.
+CI runs these checks on Python 3.10 through 3.14 and exercises both examples against a non-editable wheel outside the checkout. The source distribution includes the examples and consumer fixture. The repository deliberately has no application lockfile: this is a library, and compatible runtime bounds live in `pyproject.toml`. Release artifacts should be built in an isolated environment and smoke-tested after wheel installation.
 
 ## Privacy, reliability, and cost
 

@@ -1,0 +1,10 @@
+{
+  "id": "order-456-v1",
+  "event": "order.confirmed",
+  "data": {
+    "subject": "Order 456 confirmed",
+    "body": "Your order is ready for fulfillment.",
+    "priority": "normal",
+    "metadata": {"schema_version": 1, "order_id": 456}
+  }
+}
