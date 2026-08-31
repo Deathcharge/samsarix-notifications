@@ -9,6 +9,7 @@ from collections import OrderedDict, deque
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime
+from functools import partial
 from typing import Any, Protocol
 
 from .errors import DeliveryError, NotificationError, NotificationValidationError
@@ -51,6 +52,8 @@ class NotificationService:
         max_batch_size: int = 1_000,
         history_limit: int = 1_000,
         idempotency_cache_size: int = 1_000,
+        max_pending_deliveries: int = 1_000,
+        shutdown_timeout_seconds: float = 30.0,
         sleep: Sleep = asyncio.sleep,
     ) -> None:
         values = dict(config or {})
@@ -59,6 +62,8 @@ class NotificationService:
             "max_batch_size",
             "history_limit",
             "idempotency_cache_size",
+            "max_pending_deliveries",
+            "shutdown_timeout_seconds",
         }
         unknown = sorted(set(values) - allowed_config)
         if unknown:
@@ -69,6 +74,8 @@ class NotificationService:
         max_batch_size = int(values.get("max_batch_size", max_batch_size))
         history_limit = int(values.get("history_limit", history_limit))
         idempotency_cache_size = int(values.get("idempotency_cache_size", idempotency_cache_size))
+        max_pending_deliveries = values.get("max_pending_deliveries", max_pending_deliveries)
+        shutdown_timeout_seconds = values.get("shutdown_timeout_seconds", shutdown_timeout_seconds)
         if not 1 <= concurrency_limit <= 1_000:
             raise NotificationValidationError("concurrency_limit must be between 1 and 1000")
         if not 1 <= max_batch_size <= 10_000:
@@ -77,6 +84,16 @@ class NotificationService:
             raise NotificationValidationError("history_limit must be between 0 and 100000")
         if not 0 <= idempotency_cache_size <= 100_000:
             raise NotificationValidationError("idempotency_cache_size must be between 0 and 100000")
+        if type(max_pending_deliveries) is not int or not 1 <= max_pending_deliveries <= 100_000:
+            raise NotificationValidationError(
+                "max_pending_deliveries must be an integer between 1 and 100000"
+            )
+        if (
+            isinstance(shutdown_timeout_seconds, bool)
+            or not isinstance(shutdown_timeout_seconds, (int, float))
+            or not 0 < shutdown_timeout_seconds <= 300
+        ):
+            raise NotificationValidationError("shutdown_timeout_seconds must be between 0 and 300")
 
         self.retry_policy = retry_policy or RetryPolicy()
         self._max_batch_size = max_batch_size
@@ -88,7 +105,10 @@ class NotificationService:
         self._idempotency_cache_size = idempotency_cache_size
         self._completed: OrderedDict[str, DeliveryResult] = OrderedDict()
         self._inflight: dict[str, asyncio.Task[DeliveryResult]] = {}
-        self._idempotency_lock = asyncio.Lock()
+        self._active: set[asyncio.Task[DeliveryResult]] = set()
+        self._max_pending_deliveries = max_pending_deliveries
+        self._shutdown_timeout_seconds = shutdown_timeout_seconds
+        self._close_task: asyncio.Task[None] | None = None
         self._sleep = sleep
         self._closed = False
         for channel, transport in (transports or {}).items():
@@ -101,6 +121,10 @@ class NotificationService:
     ) -> None:
         """Register or replace one channel transport."""
 
+        if self._closed:
+            raise NotificationValidationError(
+                "Cannot register a transport after shutdown starts", code="service_closed"
+            )
         channel_name = _channel_name(channel)
         if not callable(getattr(transport, "send", None)):
             raise NotificationValidationError("transport must define an async send method")
@@ -109,36 +133,18 @@ class NotificationService:
     async def send(self, payload: NotificationPayload) -> DeliveryResult:
         """Send one notification and always return a truthful final result."""
 
-        if not isinstance(payload, NotificationPayload):
-            raise NotificationValidationError("payload must be a NotificationPayload")
-        if self._closed:
-            return self._failure_result(
-                payload,
-                started_at=utc_now(),
-                attempts=0,
-                code="service_closed",
-                message="Notification service is closed",
-                retryable=False,
-            )
-        if payload.idempotency_key is None or self._idempotency_cache_size == 0:
-            return await self._execute(payload)
-        return await self._send_idempotent(payload)
+        return await self._submit(payload, deduplicate=True)
 
     async def _send_without_retries(self, payload: NotificationPayload) -> DeliveryResult:
         """Send one unchanged payload with the dispatcher's retry loop disabled."""
 
-        if not isinstance(payload, NotificationPayload):
-            raise NotificationValidationError("payload must be a NotificationPayload")
-        if self._closed:
-            return self._failure_result(
-                payload,
-                started_at=utc_now(),
-                attempts=0,
-                code="service_closed",
-                message="Notification service is closed",
-                retryable=False,
-            )
-        return await self._execute(payload, maximum_retries=0)
+        return await self._submit(payload, deduplicate=False, maximum_retries=0)
+
+    @property
+    def pending_deliveries(self) -> int:
+        """Number of accepted deliveries running or waiting for a transport slot."""
+
+        return len(self._active)
 
     async def send_batch(
         self,
@@ -186,21 +192,60 @@ class NotificationService:
         return tuple(result for result in self.delivery_log if not result.success)
 
     async def aclose(self) -> None:
-        """Close each unique transport that exposes ``aclose``."""
+        """Stop admissions, drain accepted work, then close unique transports.
 
-        if self._closed:
-            return
-        self._closed = True
+        Each drain/cleanup phase has the configured shutdown grace period.
+        Custom transports must cooperate with asyncio cancellation.
+        """
+
+        if self._close_task is None:
+            self._closed = True
+            self._close_task = asyncio.create_task(self._drain_and_close())
+            self._close_task.add_done_callback(_observe_close_exception)
+        # Cancelling a shutdown waiter must not interrupt shared cleanup.
+        await asyncio.shield(self._close_task)
+
+    async def _drain_and_close(self) -> None:
+        # Publish the shared close task before invoking any user-defined closer,
+        # including when the host opts into an eager asyncio task factory.
+        await asyncio.sleep(0)
+        timed_out = False
+        if self._active:
+            _, pending = await asyncio.wait(
+                tuple(self._active), timeout=self._shutdown_timeout_seconds
+            )
+            if pending:
+                timed_out = True
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+
+        closers: list[asyncio.Task[None]] = []
         seen: set[int] = set()
         for transport in self._transports.values():
             if id(transport) in seen:
                 continue
             seen.add(id(transport))
-            closer = getattr(transport, "aclose", None)
-            if closer is not None:
-                outcome = closer()
-                if inspect.isawaitable(outcome):
-                    await outcome
+            closers.append(asyncio.create_task(_close_transport(transport)))
+        close_failed = False
+        if closers:
+            _, pending_closers = await asyncio.wait(closers, timeout=self._shutdown_timeout_seconds)
+            if pending_closers:
+                timed_out = True
+                for closer in pending_closers:
+                    closer.cancel()
+            outcomes = await asyncio.gather(*closers, return_exceptions=True)
+            close_failed = any(isinstance(outcome, BaseException) for outcome in outcomes)
+        self._completed.clear()
+        if timed_out:
+            raise NotificationError(
+                "Notification shutdown grace period elapsed; in-progress outcomes may be ambiguous",
+                code="shutdown_timeout",
+            )
+        if close_failed:
+            raise NotificationError(
+                "One or more notification transports failed to close", code="transport_close_failed"
+            )
 
     async def __aenter__(self) -> NotificationService:
         return self
@@ -208,35 +253,69 @@ class NotificationService:
     async def __aexit__(self, *_: object) -> None:
         await self.aclose()
 
-    async def _send_idempotent(self, payload: NotificationPayload) -> DeliveryResult:
-        assert payload.idempotency_key is not None
-        key = payload.idempotency_key
-        async with self._idempotency_lock:
+    async def _submit(
+        self,
+        payload: NotificationPayload,
+        *,
+        deduplicate: bool,
+        maximum_retries: int | None = None,
+    ) -> DeliveryResult:
+        if not isinstance(payload, NotificationPayload):
+            raise NotificationValidationError("payload must be a NotificationPayload")
+        if self._closed:
+            return self._failure_result(
+                payload,
+                started_at=utc_now(),
+                attempts=0,
+                code="service_closed",
+                message="Notification service is closed",
+                retryable=False,
+            )
+        key = payload.idempotency_key if deduplicate and self._idempotency_cache_size else None
+        # Admission and task registration contain no await: one event loop owns
+        # this service, so duplicate lookup and capacity reservation are atomic.
+        if key is not None:
             completed = self._completed.get(key)
             if completed is not None:
                 self._completed.move_to_end(key)
                 return replace(completed, deduplicated=True)
             task = self._inflight.get(key)
-            if task is None:
-                task = asyncio.create_task(self._execute(payload))
-                self._inflight[key] = task
-        try:
-            result = await asyncio.shield(task)
-        finally:
-            if task.done():
-                async with self._idempotency_lock:
-                    if self._inflight.get(key) is task:
-                        self._inflight.pop(key, None)
-        if result.success:
-            async with self._idempotency_lock:
-                existing = self._completed.get(key)
-                if existing is None:
-                    self._completed[key] = result
-                    while len(self._completed) > self._idempotency_cache_size:
-                        self._completed.popitem(last=False)
-                    return result
-                return replace(existing, deduplicated=True)
-        return result
+            if task is not None:
+                return replace(await asyncio.shield(task), deduplicated=True)
+        if len(self._active) >= self._max_pending_deliveries:
+            result = self._failure_result(
+                payload,
+                started_at=utc_now(),
+                attempts=0,
+                code="service_busy",
+                message="Notification service pending-delivery capacity reached",
+                retryable=True,
+            )
+            self._record(result)
+            return result
+        task = asyncio.create_task(self._execute(payload, maximum_retries=maximum_retries))
+        self._active.add(task)
+        if key is not None:
+            self._inflight[key] = task
+        # Cleanup belongs to the delivery, not to a possibly cancelled waiter.
+        # A done callback also handles cancellation before the coroutine starts.
+        task.add_done_callback(partial(self._delivery_done, key=key))
+        if key is not None:
+            return await asyncio.shield(task)
+        return await task
+
+    def _delivery_done(self, task: asyncio.Task[DeliveryResult], *, key: str | None) -> None:
+        self._active.discard(task)
+        if key is not None and self._inflight.get(key) is task:
+            self._inflight.pop(key)
+        if task.cancelled() or task.exception() is not None:
+            return
+        result = task.result()
+        if key is not None and result.success:
+            self._completed[key] = result
+            self._completed.move_to_end(key)
+            while len(self._completed) > self._idempotency_cache_size:
+                self._completed.popitem(last=False)
 
     async def _execute(
         self,
@@ -244,6 +323,9 @@ class NotificationService:
         *,
         maximum_retries: int | None = None,
     ) -> DeliveryResult:
+        # Eager task factories can run a coroutine inside create_task. Yield
+        # before invoking user code so admission/task ownership is registered.
+        await asyncio.sleep(0)
         started_at = utc_now()
         transport = self._transports.get(str(payload.channel))
         if transport is None:
@@ -352,3 +434,16 @@ def _channel_name(channel: str | NotificationChannel) -> str:
     if not isinstance(value, str) or not value.strip():
         raise NotificationValidationError("channel must be a non-empty string")
     return value.strip().lower()
+
+
+async def _close_transport(transport: NotificationTransport) -> None:
+    closer = getattr(transport, "aclose", None)
+    if closer is not None:
+        outcome = closer()
+        if inspect.isawaitable(outcome):
+            await outcome
+
+
+def _observe_close_exception(task: asyncio.Task[None]) -> None:
+    if not task.cancelled():
+        task.exception()
