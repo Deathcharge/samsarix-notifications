@@ -126,6 +126,7 @@ Validation includes cancelled owners and duplicates, released capacity after que
 - [x] Prove an order-confirmation reference consumer across real HTTP failure and worker restart.
 - [x] Add a versioned event fixture and exercise the journey from installed wheels in CI.
 - [x] Reproduce and fix direct-delivery task retention, bounded admission, and shutdown ordering.
+- [x] Add unpublished release-candidate validation with an artifact round trip and wheel-only execution of the sdist tests/examples.
 - [ ] Obtain an external consumer pilot and bounded live-provider acceptance evidence (owner-coordinated).
 
 ## Release acceptance criteria
@@ -136,6 +137,7 @@ Validation includes cancelled owners and duplicates, released capacity after que
 - SMTP and webhook transports have deterministic interface-level tests, including failure and retry cases.
 - Ruff formatting/lint, strict mypy, tests with at least 90% branch coverage, build, Twine metadata check, and wheel smoke import all pass.
 - CI runs the meaningful checks on supported Python versions.
+- The release workflow validates downloaded distributions without a checkout; pull-request and manual candidate runs skip the protected publish job.
 - No built-in transport reports success without provider acceptance.
 - Webhook private-address, redirect, payload-limit, timeout, and signature behavior is covered.
 - README commands and public API examples match the built artifact.
@@ -170,6 +172,14 @@ Environment: fresh `.venv`, Windows, Python 3.14.7. Commands are run through `.v
 - Non-editable wheel verification passed both examples outside the checkout with `-I` isolated imports. The durable example extracted from the sdist also passed against that wheel. Exact artifact digests and hosted-CI results belong to the PR, not a floating readiness claim.
 
 ## Completed work
+
+### Release-candidate validation (2026-08-31)
+
+CI and release workflows now pin verified Node 24 action releases: checkout 7.0.1, setup-python 7.0.0, upload-artifact 7.0.1, and download-artifact 8.0.1. The previous upload/download comments did not match their pinned runtime; all four replacements were checked against upstream action manifests, not only version labels.
+
+The release workflow runs on pull requests and manual dispatch as an unpublished candidate check. It uploads the built wheel/sdist and downloads them into a fresh job without a checkout, fails artifact-digest mismatches, records package SHA-256 hashes, and runs the sdist's full test suite and both examples against the isolated installed wheel. Candidate artifacts expire after seven days. Publication remains a separate, release-event-only job behind artifact validation and owner approval; PR/manual runs do not request publication approval or OIDC permissions. The workflow filename remains `release.yml` for the pending PyPI Trusted Publisher configuration.
+
+Local verification passed actionlint 1.7.12, Ruff formatting/lint, strict mypy (21 files), 154 tests at 94.85% branch-aware coverage, isolated wheel/sdist builds, and Twine metadata validation. All 154 sdist tests and both examples also passed against the non-editable wheel outside the checkout with isolated imports. Hosted event/round-trip evidence is recorded in the corresponding PR; none of these checks publish a package or establish live-provider acceptance.
 
 ### Lifecycle verification (2026-08-31)
 
