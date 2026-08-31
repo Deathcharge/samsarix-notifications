@@ -38,7 +38,7 @@ class NotificationService:
 
     Delivery history and idempotency are deliberately process-local and bounded.
     Applications that require crash-safe queues or cross-process deduplication
-    should persist requests before calling this library.
+    can use SQLiteOutbox and OutboxWorker or an application-owned durable broker.
     """
 
     def __init__(

@@ -5,9 +5,12 @@ import asyncio
 import json
 import sqlite3
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import timedelta
 from pathlib import Path
+from threading import Barrier
+from unittest.mock import patch
 
 import pytest
 
@@ -607,3 +610,113 @@ def test_worker_configuration_is_bounded(tmp_path: Path) -> None:
         OutboxWorker(store, service, base_delay_seconds=10, max_delay_seconds=5)
     with pytest.raises(NotificationValidationError):
         OutboxWorker(store, service, worker_id="")
+
+
+@pytest.mark.parametrize("value", [0, -1, 1_000_001, True, 1.5])
+def test_outbox_capacity_configuration_is_bounded(tmp_path: Path, value: int) -> None:
+    with pytest.raises(NotificationValidationError):
+        SQLiteOutbox(tmp_path / "invalid.sqlite3", max_messages=value)
+
+
+@pytest.mark.asyncio
+async def test_capacity_retains_duplicates_and_requires_explicit_retention(tmp_path: Path) -> None:
+    store = SQLiteOutbox(tmp_path / "capacity.sqlite3", max_messages=1)
+    store.enqueue(payload(idempotency_key="order-456"))
+    assert not store.enqueue(payload(idempotency_key="order-456")).created
+    with pytest.raises(OutboxConflictError) as error:
+        store.enqueue(payload(notification_id="another"))
+    assert error.value.code == "outbox_capacity_reached"
+    assert error.value.retryable
+
+    worker = OutboxWorker(
+        store, NotificationService(transports={"test": ScriptedTransport([TransportResult()])})
+    )
+    assert (await worker.run_once()).delivered == 1
+    with pytest.raises(OutboxConflictError):
+        store.enqueue(payload(notification_id="another"))
+    assert store.purge_completed(before=utc_now() + timedelta(seconds=1)) == 1
+    assert store.enqueue(payload(notification_id="another")).created
+
+
+@pytest.mark.parametrize("caller_owned", [False, True])
+def test_concurrent_enqueues_cannot_overfill_capacity(tmp_path: Path, caller_owned: bool) -> None:
+    database = tmp_path / "concurrent.sqlite3"
+    store = SQLiteOutbox(database, max_messages=3)
+
+    def enqueue_one(number: int) -> bool:
+        try:
+            request = payload(notification_id=f"concurrent-{number}")
+            if caller_owned:
+                with closing(sqlite3.connect(database, isolation_level=None)) as connection:
+                    return store.enqueue(request, connection=connection).created
+            return store.enqueue(request).created
+        except OutboxConflictError as error:
+            assert error.code == "outbox_capacity_reached"
+            return False
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        assert sum(executor.map(enqueue_one, range(16))) == 3
+    assert store.counts()[OutboxStatus.PENDING] == 3
+
+
+def test_capacity_failure_rolls_back_application_transaction(tmp_path: Path) -> None:
+    store = SQLiteOutbox(tmp_path / "application.sqlite3", max_messages=1)
+    store.enqueue(payload())
+    with closing(sqlite3.connect(store.database)) as connection:
+        connection.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY)")
+        with pytest.raises(OutboxConflictError), connection:
+            connection.execute("INSERT INTO orders VALUES (2)")
+            store.enqueue(payload(notification_id="order-2"), connection=connection)
+        assert connection.execute("SELECT COUNT(*) FROM orders").fetchone() == (0,)
+
+
+def test_competing_duplicate_is_readable_when_it_fills_capacity(tmp_path: Path) -> None:
+    store = SQLiteOutbox(tmp_path / "duplicates.sqlite3", max_messages=1)
+    barrier = Barrier(2, timeout=10)
+    original = store._find_existing
+
+    def synchronized_lookup(
+        connection: sqlite3.Connection, request: NotificationPayload
+    ) -> sqlite3.Row | None:
+        row = original(connection, request)
+        if row is None:
+            barrier.wait()
+        return row
+
+    def enqueue_one(number: int) -> bool:
+        with closing(sqlite3.connect(store.database, isolation_level=None)) as connection:
+            return store.enqueue(
+                payload(notification_id=f"duplicate-{number}", idempotency_key="same-order"),
+                connection=connection,
+            ).created
+
+    with patch.object(store, "_find_existing", side_effect=synchronized_lookup):
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            assert sum(executor.map(enqueue_one, range(2))) == 1
+    assert store.counts()[OutboxStatus.PENDING] == 1
+
+
+def test_deep_metadata_rejected_without_creating_a_row(tmp_path: Path) -> None:
+    store = outbox(tmp_path)
+    value: object = None
+    for _ in range(2000):
+        value = [value]
+    with pytest.raises(NotificationValidationError) as error:
+        store.enqueue(payload(metadata={"nested": value}))
+    assert error.value.code == "outbox_payload_too_complex"
+    assert sum(store.counts().values()) == 0
+
+
+@pytest.mark.asyncio
+async def test_deep_corrupt_json_is_quarantined_without_aborting_worker(tmp_path: Path) -> None:
+    store = outbox(tmp_path)
+    store.enqueue(payload())
+    with closing(sqlite3.connect(store.database)) as connection, connection:
+        connection.execute(
+            "UPDATE samsarix_notification_outbox SET payload_json = ?",
+            ("[" * 2000 + "0" + "]" * 2000,),
+        )
+    transport = ScriptedTransport([TransportResult()])
+    worker = OutboxWorker(store, NotificationService(transports={"test": transport}))
+    assert (await worker.run_once()).dead_lettered == 1
+    assert transport.calls == 0

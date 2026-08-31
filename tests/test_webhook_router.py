@@ -23,6 +23,38 @@ async def public_resolver(_host: str, _port: int) -> Sequence[str]:
     return ["93.184.216.34"]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("registered", [False, True])
+async def test_deep_payload_fails_before_dns_or_http(registered: bool) -> None:
+    value: object = None
+    for _ in range(2000):
+        value = [value]
+
+    async def no_dns(_host: str, _port: int) -> Sequence[str]:
+        pytest.fail("invalid payload must not reach DNS")
+
+    def no_http(_request: httpx.Request) -> httpx.Response:
+        pytest.fail("invalid payload must not reach HTTP")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(no_http)) as client:
+        router = WebhookRouter(client=client, resolver=no_dns, policy=allowed_policy())
+        with pytest.raises(NotificationValidationError) as error:
+            if registered:
+                router.register_route("order.created", "https://example.com/hook")
+                await router.route("order.created", {"nested": value})
+            else:
+                await router.send(
+                    NotificationPayload(
+                        channel="webhook",
+                        recipient="https://example.com/hook",
+                        subject="Order",
+                        body="Created",
+                        metadata={"nested": value},
+                    )
+                )
+        assert error.value.code == "webhook_payload_too_complex"
+
+
 def allowed_policy(host: str = "example.com", **overrides: object) -> WebhookPolicy:
     values: dict[str, object] = {"allowed_hosts": frozenset({host})}
     values.update(overrides)
