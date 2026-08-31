@@ -18,6 +18,7 @@ from uuid import uuid4
 import httpx
 
 from ._json import encode_json
+from ._validation import is_bounded_int, is_bounded_number
 from .errors import ConfigurationError, DeliveryError, NotificationValidationError
 from .models import NotificationPayload, TransportResult
 
@@ -44,14 +45,20 @@ class WebhookPolicy:
         object.__setattr__(self, "allowed_schemes", schemes)
         normalized_hosts = frozenset(_normalize_host(value) for value in self.allowed_hosts)
         object.__setattr__(self, "allowed_hosts", normalized_hosts)
-        if any(not 1 <= port <= 65_535 for port in self.allowed_ports):
-            raise ConfigurationError("Webhook ports must be between 1 and 65535")
-        if not 1_024 <= self.max_payload_bytes <= 10 * 1024 * 1024:
-            raise ConfigurationError("Webhook max_payload_bytes must be between 1 KiB and 10 MiB")
-        if not 0 < self.timeout_seconds <= 300:
+        if any(not is_bounded_int(port, 1, 65_535) for port in self.allowed_ports):
+            raise ConfigurationError("Webhook ports must be integers between 1 and 65535")
+        if type(self.allow_private_addresses) is not bool:
+            raise ConfigurationError("Webhook allow_private_addresses must be a boolean")
+        if not is_bounded_int(self.max_payload_bytes, 1_024, 10 * 1024 * 1024):
+            raise ConfigurationError(
+                "Webhook max_payload_bytes must be an integer from 1 KiB to 10 MiB"
+            )
+        if not is_bounded_number(self.timeout_seconds, 0, 300, exclusive_minimum=True):
             raise ConfigurationError("Webhook timeout_seconds must be between 0 and 300")
-        if not 1 <= self.max_connections <= 1_000:
-            raise ConfigurationError("Webhook max_connections must be between 1 and 1000")
+        if not is_bounded_int(self.max_connections, 1, 1_000):
+            raise ConfigurationError(
+                "Webhook max_connections must be an integer between 1 and 1000"
+            )
 
 
 @dataclass(frozen=True, slots=True)

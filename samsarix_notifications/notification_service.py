@@ -13,6 +13,7 @@ from functools import partial
 from typing import Any, Protocol
 
 from ._idempotency import snapshot_request
+from ._validation import is_bounded_int, is_bounded_number
 from .errors import DeliveryError, NotificationError, NotificationValidationError
 from .models import (
     DeliveryResult,
@@ -71,29 +72,33 @@ class NotificationService:
             raise NotificationValidationError(
                 f"Unknown notification service configuration keys: {', '.join(unknown)}"
             )
-        concurrency_limit = int(values.get("concurrency_limit", concurrency_limit))
-        max_batch_size = int(values.get("max_batch_size", max_batch_size))
-        history_limit = int(values.get("history_limit", history_limit))
-        idempotency_cache_size = int(values.get("idempotency_cache_size", idempotency_cache_size))
+        concurrency_limit = values.get("concurrency_limit", concurrency_limit)
+        max_batch_size = values.get("max_batch_size", max_batch_size)
+        history_limit = values.get("history_limit", history_limit)
+        idempotency_cache_size = values.get("idempotency_cache_size", idempotency_cache_size)
         max_pending_deliveries = values.get("max_pending_deliveries", max_pending_deliveries)
         shutdown_timeout_seconds = values.get("shutdown_timeout_seconds", shutdown_timeout_seconds)
-        if not 1 <= concurrency_limit <= 1_000:
-            raise NotificationValidationError("concurrency_limit must be between 1 and 1000")
-        if not 1 <= max_batch_size <= 10_000:
-            raise NotificationValidationError("max_batch_size must be between 1 and 10000")
-        if not 0 <= history_limit <= 100_000:
-            raise NotificationValidationError("history_limit must be between 0 and 100000")
-        if not 0 <= idempotency_cache_size <= 100_000:
-            raise NotificationValidationError("idempotency_cache_size must be between 0 and 100000")
-        if type(max_pending_deliveries) is not int or not 1 <= max_pending_deliveries <= 100_000:
+        if not is_bounded_int(concurrency_limit, 1, 1_000):
+            raise NotificationValidationError(
+                "concurrency_limit must be an integer between 1 and 1000"
+            )
+        if not is_bounded_int(max_batch_size, 1, 10_000):
+            raise NotificationValidationError(
+                "max_batch_size must be an integer between 1 and 10000"
+            )
+        if not is_bounded_int(history_limit, 0, 100_000):
+            raise NotificationValidationError(
+                "history_limit must be an integer between 0 and 100000"
+            )
+        if not is_bounded_int(idempotency_cache_size, 0, 100_000):
+            raise NotificationValidationError(
+                "idempotency_cache_size must be an integer between 0 and 100000"
+            )
+        if not is_bounded_int(max_pending_deliveries, 1, 100_000):
             raise NotificationValidationError(
                 "max_pending_deliveries must be an integer between 1 and 100000"
             )
-        if (
-            isinstance(shutdown_timeout_seconds, bool)
-            or not isinstance(shutdown_timeout_seconds, (int, float))
-            or not 0 < shutdown_timeout_seconds <= 300
-        ):
+        if not is_bounded_number(shutdown_timeout_seconds, 0, 300, exclusive_minimum=True):
             raise NotificationValidationError("shutdown_timeout_seconds must be between 0 and 300")
 
         self.retry_policy = retry_policy or RetryPolicy()

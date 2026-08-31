@@ -15,6 +15,7 @@ from pathlib import PurePath
 from string import Template
 from typing import Any
 
+from ._validation import is_bounded_int, is_bounded_number
 from .errors import ConfigurationError, DeliveryError, NotificationValidationError
 from .models import NotificationPayload, TransportResult
 
@@ -36,19 +37,23 @@ class SMTPConfig:
     def __post_init__(self) -> None:
         if not self.host or any(character.isspace() for character in self.host):
             raise ConfigurationError("SMTP host must be a non-empty hostname")
-        if not 1 <= self.port <= 65_535:
-            raise ConfigurationError("SMTP port must be between 1 and 65535")
+        if not is_bounded_int(self.port, 1, 65_535):
+            raise ConfigurationError("SMTP port must be an integer between 1 and 65535")
         _validate_email_address(self.from_address, name="from_address")
+        if type(self.start_tls) is not bool or type(self.use_ssl) is not bool:
+            raise ConfigurationError("SMTP start_tls and use_ssl must be booleans")
         if self.start_tls and self.use_ssl:
             raise ConfigurationError("SMTP start_tls and use_ssl cannot both be enabled")
         if bool(self.username) != bool(self.password):
             raise ConfigurationError("SMTP username and password must be supplied together")
         if self.username and not (self.start_tls or self.use_ssl):
             raise ConfigurationError("SMTP authentication requires TLS")
-        if not 0 < self.timeout_seconds <= 300:
+        if not is_bounded_number(self.timeout_seconds, 0, 300, exclusive_minimum=True):
             raise ConfigurationError("SMTP timeout_seconds must be between 0 and 300")
-        if not 1_024 <= self.max_message_bytes <= 50 * 1024 * 1024:
-            raise ConfigurationError("SMTP max_message_bytes must be between 1 KiB and 50 MiB")
+        if not is_bounded_int(self.max_message_bytes, 1_024, 50 * 1024 * 1024):
+            raise ConfigurationError(
+                "SMTP max_message_bytes must be an integer from 1 KiB to 50 MiB"
+            )
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, Any]) -> SMTPConfig:

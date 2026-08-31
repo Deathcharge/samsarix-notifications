@@ -145,6 +145,14 @@ asyncio.run(main())
 
 `EmailService` also supports bounded in-memory attachments and `$name`-style templates through `EmailTemplate`. Templates perform string substitution only; they do not evaluate expressions.
 
+## Configuration values
+
+Counts, capacities, byte limits, ports, and retry numbers require native Python `int` values within their documented bounds. Durations accept finite native `int` or `float` values, including fractional seconds. Boolean settings (`start_tls`, `use_ssl`, `allow_private_addresses`, and outbox `initialize`) require `True` or `False`.
+
+Numeric strings, booleans used as numbers, fractional counts, `NaN`, infinity, and custom numeric objects are rejected; configuration mappings follow the same rules as keyword arguments. Parse environment variables explicitly (`int(...)` for counts/ports, `float(...)` for durations, and an explicit accepted-values parser for boolean flags). Do not use `bool("false")`, which is `True` in Python. Earlier pre-release dispatcher mappings silently converted some counts; that coercion is no longer supported.
+
+Invalid transport settings raise `ConfigurationError` (`invalid_configuration`); invalid dispatcher, retry, alert, or outbox limits raise `NotificationValidationError` (`invalid_input`). These numeric/boolean checks run at construction or operation entry, before transport attempts or database access. Existing bounds and defaults are unchanged: zero retries, zero retained history/cache, and zero retry delays remain available where supported. `RetryPolicy.delay_before_retry()` takes an integer retry number from 1 to 10.
+
 ## Delivery semantics
 
 `NotificationService.send()` returns a `DeliveryResult`; it does not report success until a transport accepts the message. Results include attempts, timestamps, provider status, and stable error codes. They are truthy only when delivered.
