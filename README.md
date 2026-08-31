@@ -259,7 +259,9 @@ python -m build
 python -m twine check dist/*
 ```
 
-CI runs these checks on Python 3.10 through 3.14 and exercises both examples against a non-editable wheel outside the checkout. The source distribution includes the examples and consumer fixture. The repository deliberately has no application lockfile: this is a library, and compatible runtime bounds live in `pyproject.toml`. Release artifacts should be built in an isolated environment and smoke-tested after wheel installation.
+CI runs these checks on Linux/Python 3.10–3.14, plus Windows and macOS on Python 3.14. A separate Linux/Python 3.10 job tests the declared HTTPX minimum (`0.27.0`); other jobs resolve current compatible dependencies. Every job checks dependency consistency with `pip check` and runs the full suite and both examples against a non-editable wheel in a temporary environment outside the checkout, using isolated imports. This is representative platform coverage, not every OS/Python/dependency combination.
+
+The release workflow additionally tests the source distribution's packaged tests, examples, and fixture in a fresh job without a checkout. The repository deliberately has no application lockfile: this is a library, and compatible runtime bounds live in `pyproject.toml`. Release artifacts should be built in an isolated environment and tested after wheel installation.
 
 ## Privacy, reliability, and cost
 

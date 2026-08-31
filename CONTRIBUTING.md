@@ -29,6 +29,8 @@ python -m twine check dist/*
 
 Add focused tests for behavior changes. Network tests must use a local server or deterministic HTTPX transport; CI must never require live provider credentials or spend money. Public functions and classes require type annotations and concise docstrings.
 
+The CI matrix covers Linux on Python 3.10–3.14, Windows/macOS on Python 3.14, and HTTPX 0.27.0 on Linux/Python 3.10. Each job repeats the full tests and examples from an isolated installed wheel. Keep virtual-environment executable paths portable (`Scripts/python.exe` on Windows, `bin/python` elsewhere), and update the lower-bound job when changing the supported runtime dependency range. This job tests the direct HTTPX minimum, not every transitive dependency's minimum.
+
 ## Security-sensitive changes
 
 Treat webhook destination validation, redirect behavior, SMTP TLS/authentication, retry classification, idempotency, payload limits, and logging as security-sensitive. Include a negative test for the bypass or failure state being changed. Never add real credentials, provider tokens, private message content, or production endpoints to fixtures.
