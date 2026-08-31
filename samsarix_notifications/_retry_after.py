@@ -3,11 +3,16 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
 from ._validation import MAX_RETRY_AFTER_SECONDS
 from .errors import DeliveryError
+
+_RFC850_DATE = re.compile(
+    r"[A-Za-z]+, [0-9]{2}-[A-Za-z]{3}-([0-9]{2}) [0-9]{2}:[0-9]{2}:[0-9]{2} GMT"
+)
 
 
 def parse_retry_after(value: str | None, *, now: datetime) -> float | None:
@@ -33,6 +38,23 @@ def parse_retry_after(value: str | None, *, now: datetime) -> float | None:
     else:
         try:
             scheduled = parsedate_to_datetime(value)
+            obsolete = _RFC850_DATE.fullmatch(value)
+            if obsolete is not None:
+                # HTTP's rolling 50-year window differs from email's fixed
+                # 1969/2068 cutoff. Compare components to handle leap years.
+                year = ((now.year + 50) // 100) * 100 + int(obsolete[1])
+                candidate = (
+                    year,
+                    scheduled.month,
+                    scheduled.day,
+                    scheduled.hour,
+                    scheduled.minute,
+                    scheduled.second,
+                )
+                ceiling = (now.year + 50, now.month, now.day, now.hour, now.minute, now.second)
+                if candidate > ceiling:
+                    year -= 100
+                scheduled = scheduled.replace(year=year)
             # Obsolete asctime HTTP dates have no zone but mean GMT.
             if scheduled.tzinfo is None:
                 scheduled = scheduled.replace(tzinfo=timezone.utc)

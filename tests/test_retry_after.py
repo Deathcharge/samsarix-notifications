@@ -51,6 +51,40 @@ def router_for(client: httpx.AsyncClient) -> WebhookRouter:
     )
 
 
+@pytest.mark.parametrize(
+    ("now", "date", "expected"),
+    [
+        (datetime(2026, 8, 31, 12), datetime(2069, 8, 31, 12), None),
+        (datetime(2026, 8, 31, 12), datetime(2076, 8, 31, 12), None),
+        (datetime(2026, 8, 31, 12), datetime(2076, 8, 31, 12, 0, 1), 0),
+        (datetime(2026, 8, 31, 12), datetime(2077, 1, 1), 0),
+        (datetime(2070, 1, 1), datetime(2070, 1, 1, 0, 1), 60),
+        (datetime(2099, 12, 31, 23, 59), datetime(2100, 1, 1), 60),
+    ],
+)
+async def test_obsolete_http_dates_use_rolling_fifty_year_window(
+    now: datetime, date: datetime, expected: float | None
+) -> None:
+    header = date.strftime("%A, %d-%b-%y %H:%M:%S GMT")
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(503, headers={"Retry-After": header})
+        )
+    ) as client:
+        with patch(
+            "samsarix_notifications.webhook_router.utc_now",
+            return_value=now.replace(tzinfo=timezone.utc),
+        ):
+            with pytest.raises(DeliveryError) as caught:
+                await router_for(client).send(payload())
+    if expected is None:
+        assert caught.value.code == "webhook_retry_after_unsupported"
+        assert caught.value.retryable is False
+    else:
+        assert caught.value.retryable is True
+        assert caught.value.retry_after_seconds == expected
+
+
 async def test_direct_retry_does_not_shorten_provider_delay_to_local_cap() -> None:
     calls = 0
 
