@@ -32,6 +32,7 @@ jobs:
       - run: python -m mypy
       - run: python -m pytest --cov=samsarix_notifications --cov-report=term-missing
       - run: python examples/local_webhook.py
+      - run: python examples/durable_outbox.py
       - run: python -m build
       - run: python -m twine check dist/*
       - name: Verify wheel contents and imports
@@ -41,3 +42,5 @@ jobs:
           "$RUNNER_TEMP/wheel-smoke/bin/python" -m pip install dist/*.whl
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/wheel-smoke/bin/python" -c "import samsarix_notifications as s; assert s.__version__ == '0.1.0'; print(s.__version__)"
+          "$RUNNER_TEMP/wheel-smoke/bin/python" -I "$GITHUB_WORKSPACE/examples/local_webhook.py"
+          "$RUNNER_TEMP/wheel-smoke/bin/python" -I "$GITHUB_WORKSPACE/examples/durable_outbox.py"

@@ -45,6 +45,8 @@ Run the complete credential-free example with:
 python examples/durable_outbox.py
 ```
 
+The example rolls back a transaction, commits an order and notification together, then starts two independent worker processes against a real loopback HTTP receiver. The first receives HTTP 503; the restarted worker receives HTTP 202. It verifies the stored receipt and duplicate enqueue against `examples/fixtures/order_confirmed_v1.json`. Expected summary: `worker_processes=2`, `http_attempts=2`, `accepted_events=1`, `durable_status="delivered"`, `duplicate_created=false`. The consumer and data are synthetic; this does not prove production adoption or exactly-once processing. No credentials or external network calls are needed, and its temporary database is removed after the demonstration.
+
 ## Worker lifecycle
 
 ```python
@@ -99,11 +101,19 @@ outbox.purge_completed(before=utc_now() - timedelta(days=30), limit=1_000)
 
 The outbox deliberately retains dead letters until an operator requeues them or handles the database row under an application-defined retention policy.
 
+### Backpressure and retention
+
+`SQLiteOutbox(path, max_messages=10_000)` caps **all retained rows**, including delivered and dead-letter records. The integer limit must be from 1 to 1,000,000. New inserts at capacity raise `OutboxConflictError` with `code="outbox_capacity_reached"` and `retryable=True`; matching duplicate requests remain readable and return `created=False`. The capacity predicate and insert are one atomic SQL statement, including when the caller owns an autocommit connection. Let this exception roll back your application transaction, then retry only after an operator or retention job has freed capacity. Do not acknowledge an order whose transaction rolled back.
+
+All writers for a database should use the same configured cap. The limit is per-instance policy, not a constraint on raw SQL or another application configured with a higher cap. Existing rows are never deleted merely because a lower cap is configured. Delivery alone does not free a slot: call `purge_completed` for delivered rows outside your business replay window. Purging also removes durable deduplication history, so subsequent replay can create a new delivery. Dead letters require deliberate recovery/retention, not automatic deletion.
+
+This is a row limit, not a physical-disk quota. Choose a substantially lower cap for constrained hosts, monitor disk usage, and account for SQLite journals, free pages, other application tables, and backups. At the 2 MiB record maximum, 10,000 rows could contain about 20 GiB of payload data before overhead. A row deletion makes space reusable inside SQLite; it does not guarantee file shrinking or secure erasure.
+
 ## Privacy and storage
 
 The SQLite database contains notification recipients, subjects, bodies, JSON metadata, and provider receipts in plaintext. Store it in a private directory, restrict filesystem permissions, include it in backup and disk-encryption policy where appropriate, and never put credentials or secrets in notification metadata. The outbox does not log message content or transmit telemetry.
 
-Metadata must be JSON-serializable, and the complete encoded record is capped at 2 MiB. In-memory email attachments are intentionally not serialized into the outbox; persist large artifacts separately and enqueue a stable reference or use a custom codec/transport boundary.
+Metadata must contain JSON-native values with string object keys (tuples are accepted as arrays); non-finite floats and unsupported objects are rejected. The complete record is capped at 2 MiB. Before encoding, the record is limited to 32 levels of nesting, 10,000 visited values/keys, a cumulative text budget, and integers of at most 4,096 bits. Excessive nesting, cycles, or expansion produce `outbox_payload_too_complex`; byte overflow produces `outbox_payload_too_large`; unsupported values produce `outbox_payload_not_json`. The envelope counts toward these limits. In-memory email attachments are intentionally not serialized; persist large artifacts separately and enqueue a stable reference or use a custom transport boundary.
 
 ## Scope boundary
 

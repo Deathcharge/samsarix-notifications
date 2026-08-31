@@ -7,7 +7,6 @@ import asyncio
 import hashlib
 import hmac
 import ipaddress
-import json
 import re
 import socket
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -18,6 +17,7 @@ from uuid import uuid4
 
 import httpx
 
+from ._json import encode_json
 from .errors import ConfigurationError, DeliveryError, NotificationValidationError
 from .models import NotificationPayload, TransportResult
 
@@ -124,7 +124,8 @@ class WebhookRouter:
                 "id": event_id or str(uuid4()),
                 "event": event_type,
                 "data": dict(payload),
-            }
+            },
+            max_bytes=self.policy.max_payload_bytes,
         )
         return await self._deliver(route, event_type, body)
 
@@ -147,7 +148,8 @@ class WebhookRouter:
                     "priority": payload.priority,
                     "metadata": metadata,
                 },
-            }
+            },
+            max_bytes=self.policy.max_payload_bytes,
         )
         return await self._deliver(WebhookRoute(payload.recipient), event_type_value, body)
 
@@ -314,16 +316,5 @@ def _validate_event_type(event_type: str) -> None:
         )
 
 
-def _encode_json(value: Mapping[str, Any]) -> bytes:
-    try:
-        return json.dumps(
-            value,
-            ensure_ascii=False,
-            allow_nan=False,
-            separators=(",", ":"),
-        ).encode()
-    except (TypeError, ValueError) as exc:
-        raise NotificationValidationError(
-            "webhook payload must contain JSON-serializable values",
-            code="webhook_payload_not_json",
-        ) from exc
+def _encode_json(value: Mapping[str, Any], *, max_bytes: int) -> bytes:
+    return encode_json(value, max_bytes=max_bytes, prefix="webhook").encode("utf-8")

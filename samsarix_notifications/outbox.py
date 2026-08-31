@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
 
+from ._json import encode_json
 from .errors import NotificationValidationError, OutboxConflictError, OutboxLeaseError
 from .models import DeliveryResult, NotificationPayload, utc_now
 from .notification_service import NotificationService
@@ -116,6 +117,7 @@ class SQLiteOutbox:
         database: str | Path,
         *,
         busy_timeout_seconds: float = 5.0,
+        max_messages: int = 10_000,
         initialize: bool = True,
     ) -> None:
         path = str(database)
@@ -126,8 +128,11 @@ class SQLiteOutbox:
             )
         if not 0 < busy_timeout_seconds <= 300:
             raise NotificationValidationError("busy_timeout_seconds must be between 0 and 300")
+        if type(max_messages) is not int or not 1 <= max_messages <= 1_000_000:
+            raise NotificationValidationError("max_messages must be an integer from 1 to 1000000")
         self.database = path
         self.busy_timeout_seconds = busy_timeout_seconds
+        self.max_messages = max_messages
         if initialize:
             self.initialize()
 
@@ -193,12 +198,13 @@ class SQLiteOutbox:
                     active.commit()
                 return EnqueueResult(_row_to_message(existing), created=False)
             try:
-                active.execute(
+                cursor = active.execute(
                     f"""
                     INSERT INTO {_TABLE} (
                         message_id, idempotency_key, payload_json, payload_sha256,
                         status, enqueued_at, available_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ) SELECT ?, ?, ?, ?, ?, ?, ?
+                    WHERE (SELECT COUNT(*) FROM {_TABLE}) < ?
                     """,
                     (
                         payload.notification_id,
@@ -208,8 +214,23 @@ class SQLiteOutbox:
                         OutboxStatus.PENDING.value,
                         _encode_time(enqueued_at),
                         _encode_time(scheduled_for),
+                        self.max_messages,
                     ),
                 )
+                if cursor.rowcount != 1:
+                    # A caller-owned autocommit connection can observe a
+                    # competing duplicate between the lookup and this insert.
+                    existing = self._find_existing(active, payload)
+                    if existing is not None:
+                        self._verify_fingerprint(existing, fingerprint)
+                        if own_connection:
+                            active.commit()
+                        return EnqueueResult(_row_to_message(existing), created=False)
+                    raise OutboxConflictError(
+                        "outbox capacity reached; apply retention before enqueueing more messages",
+                        code="outbox_capacity_reached",
+                        retryable=True,
+                    )
             except sqlite3.IntegrityError:
                 existing = self._find_existing(active, payload)
                 if existing is None:
@@ -790,8 +811,10 @@ def _encode_payload(payload: NotificationPayload) -> tuple[str, str]:
 
 def _decode_payload(encoded: str) -> NotificationPayload:
     try:
+        if len(encoded) > _MAX_ENCODED_PAYLOAD_BYTES:
+            raise ValueError("stored payload is too large")
         value = json.loads(encoded)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, RecursionError) as exc:
         raise OutboxConflictError(
             "stored outbox payload is invalid JSON", code="outbox_payload_corrupt"
         ) from exc
@@ -825,19 +848,7 @@ def _decode_payload(encoded: str) -> NotificationPayload:
 
 
 def _json_dumps(value: object) -> str:
-    try:
-        return json.dumps(
-            value,
-            ensure_ascii=False,
-            allow_nan=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-    except (TypeError, ValueError) as exc:
-        raise NotificationValidationError(
-            "outbox payload metadata must be JSON-serializable",
-            code="outbox_payload_not_json",
-        ) from exc
+    return encode_json(value, max_bytes=_MAX_ENCODED_PAYLOAD_BYTES, prefix="outbox", sort_keys=True)
 
 
 def _row_to_message(row: sqlite3.Row) -> OutboxMessage:
