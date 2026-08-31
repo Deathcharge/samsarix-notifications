@@ -1,6 +1,6 @@
 # Contributing to Samsarix Notifications
 
-Thanks for helping improve the package. Contributions should preserve its narrow purpose: a dependable embedded Python delivery boundary for email, webhooks, and custom transports. Hosted infrastructure, databases, user management, and unrelated platform code are out of scope unless the product definition changes explicitly.
+Thanks for helping improve the package. Contributions should preserve its narrow purpose: a dependable embedded Python delivery boundary for email, webhooks, and custom transports, with optional local SQLite persistence. Hosted infrastructure, managed/distributed databases, user management, and unrelated platform code are out of scope unless the product definition changes explicitly.
 
 ## Setup
 
@@ -37,4 +37,6 @@ Treat webhook destination validation, redirect behavior, SMTP TLS/authentication
 
 Keep changes small enough to review, explain the user-visible outcome, and include the exact commands you ran. Do not claim a provider integration works without an interface-level test. Use conventional commit prefixes such as `feat:`, `fix:`, `docs:`, `test:`, and `chore:` when practical.
 
-The default branch is not a publication trigger. Publishing a GitHub Release invokes the protected PyPI workflow; the `pypi` environment should require owner approval. License changes, credentials, and production deployments remain owner-controlled.
+The release workflow runs a non-publishing artifact round trip on every pull request. It installs the downloaded wheel in a fresh job without a checkout and runs tests and examples extracted from the source distribution. A manual candidate check is available with `gh workflow run release.yml --ref main`; this also skips publication and does not request environment approval or OIDC permissions.
+
+The default branch is not a publication trigger. Only publishing a version-matched GitHub Release can invoke the protected PyPI publish job after artifact validation; the `pypi` environment requires owner approval. License changes, credentials, and production deployments remain owner-controlled.

@@ -266,7 +266,15 @@ The defaults cap concurrent deliveries at 10, accepted running/queued operations
 
 ## Release, support, and license
 
-Build artifacts with `python -m build`. Publishing is isolated in `.github/workflows/release.yml` and occurs only when a GitHub Release is published, after the `pypi` environment and PyPI Trusted Publisher are configured. The workflow uses short-lived OIDC credentials rather than a stored package token and generates PyPI attestations through the official publishing action.
+Build artifacts with `python -m build`. The [release workflow](.github/workflows/release.yml) also validates unpublished candidates on every pull request or manual run. To check the current default branch without publishing:
+
+```bash
+gh workflow run release.yml --ref main
+```
+
+Candidate validation uploads the wheel and source distribution, downloads them in a fresh job with no repository checkout, checks artifact integrity, and runs the source distribution's full tests and both consumer examples against the installed wheel. The run summary records package SHA-256 hashes, and the `python-package-distributions` artifact is retained for seven days. A successful candidate run establishes package/consumer compatibility, not live-provider acceptance or production adoption.
+
+The publish job is skipped for pull requests and manual runs. Publication occurs only when a GitHub Release is published with a tag matching the package version, after artifact validation and owner approval in the `pypi` environment. PyPI Trusted Publishing must be configured first. Only the separate publish job receives short-lived OIDC credentials; it downloads the validated artifacts without rebuilding them and generates PyPI attestations through the official publishing action.
 
 The project is licensed under the [Mozilla Public License 2.0](LICENSE), with copyright and contact information in [NOTICE](NOTICE). MPL-2.0 is a file-level copyleft license: distributed modifications to covered source files remain available under MPL-2.0, while a larger proprietary application may use the library without being relicensed as a whole. License and copyright notices must be preserved. This is a practical explanation, not legal advice.
 
