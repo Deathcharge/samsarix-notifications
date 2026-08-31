@@ -4,6 +4,9 @@ All notable changes will be documented here. The project follows semantic versio
 
 ## 0.1.0 - Unreleased
 
+- Reject conflicting direct idempotency keys with zero transport attempts; fingerprint delivery intent without retaining completed message content.
+- Snapshot accepted idempotent payloads, including nested metadata and email attachments, and bound identity processing before dispatch.
+- Verify conflict behavior through real localhost HTTP, the SMTP interface, cancelled callers, and bounded cache eviction.
 - Own direct-delivery task cleanup independently of cancelled callers, retaining successful idempotency results without leaking finished tasks.
 - Add bounded pending-delivery admission, a public pending count, and retryable zero-attempt backpressure.
 - Drain accepted sends before shared transport shutdown, with configurable grace periods and explicit timeout/cleanup errors.

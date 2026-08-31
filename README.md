@@ -152,13 +152,25 @@ asyncio.run(main())
 - Retryable timeouts, connection errors, HTTP `408`/`425`/`429`, HTTP `5xx`, and transient SMTP responses use deterministic exponential backoff.
 - Retries are capped at three by default and ten by hard validation. At worst, one request performs `1 + max_retries` provider attempts.
 - Batches are capped at 1,000 payloads by default and 10,000 by hard validation; transport concurrency remains independently bounded.
-- A supplied idempotency key deduplicates successful and in-flight sends within one `NotificationService` process.
+- A supplied idempotency key deduplicates matching successful and in-flight sends within one `NotificationService` process. Reusing a retained key for different delivery intent returns non-retryable `idempotency_conflict` with zero transport attempts.
 - Accepted running and queued deliveries are capped separately by `max_pending_deliveries` (default 1,000). At capacity, a new operation returns retryable `service_busy` with zero attempts; a matching in-flight or cached idempotent request can still reuse its result.
 - Delivery results expose whether a final failure remains retryable, allowing a durable caller to make an explicit reschedule decision.
 - Direct-delivery history and idempotency caches are bounded and process-local. `SQLiteOutbox` adds optional crash-safe, cross-process persistence with at-least-once delivery semantics.
 - Batch results preserve input order and duplicate recipients.
 - Cancellation propagates for ordinary sends. An in-flight idempotent send is shielded so a cancelled waiter cannot cause another caller to repeat an ambiguous external side effect.
 - Completed idempotent operations move into the bounded success cache and release their task references even when every waiter has been cancelled. Failed or cancelled operations release the key for a later explicit retry.
+
+### Idempotency and payload ownership
+
+Keys are scoped to one service instance, not automatically to a tenant, channel, or recipient. Include your application/tenant/operation scope in the key and never use one key for different intended notifications. While a key is in flight or retained in the success cache, the dispatcher compares channel, recipient, subject, body, priority, metadata, `retry_count`, and `max_retries`. A conflict does not wait for or replace the original operation, refresh its cache position, or expose its result. Fix the caller's intent/key mismatch instead of blindly retrying the conflict.
+
+Regenerated `notification_id` and `created_at` values do not change identity. A matching retry returns the **original** delivery result/notification ID with `deduplicated=True`. Mapping order is ignored; scalar types, list versus tuple, sequence order, and attachment contents are significant. No equivalence is inferred between an `EmailAttachment` object and a dictionary that happens to encode the same attachment.
+
+With direct idempotency enabled, the dispatcher takes its own payload snapshot before admission/queuing, including nested metadata containers. Later caller edits cannot change that accepted delivery. Snapshot/identity values support native dictionaries with string keys, lists, tuples, strings, bytes, booleans, integers up to 4,096 bits, finite floats, `None`, and `EmailAttachment` objects. Traversal is capped at 32 levels, 10,000 visited values/keys, and a 64 MiB identity-data budget (including container bookkeeping). Transport-specific encoded-message limits still apply. Unsupported values, excessive complexity, and oversized data return zero-attempt, non-retryable `idempotency_payload_unsupported`, `idempotency_payload_too_complex`, or `idempotency_payload_too_large` respectively. Validation failures do not reserve a key.
+
+Normalize custom metadata to these types when using direct idempotency. Calls without a key, or with `idempotency_cache_size=0`, retain custom-transport metadata support but have no dispatcher snapshot or deduplication guarantee; callers must keep their payload unchanged until completion. Custom transports must not mutate supplied payloads. The service remains single-event-loop-owned, not thread-safe.
+
+Completed identity entries retain a SHA-256 fingerprint and result, not a second copy of message bodies or attachments. Cache eviction, shutdown, process restart, or a failed/cancelled delivery ends that key's protection; subsequent calls may attempt delivery again. This is not exactly-once provider execution. `SQLiteOutbox` retains its separate JSON-only durable fingerprint contract and at-least-once semantics.
 
 ### Application shutdown and backpressure
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Event, Thread
 from typing import ClassVar
@@ -56,6 +57,11 @@ async def test_complete_local_webhook_journey() -> None:
     try:
         async with NotificationService(transports={"webhook": router}) as service:
             result = await service.send(request)
+            duplicate = await service.send(replace(request, notification_id="new-request-id"))
+            conflict = await service.send(replace(request, body="different business event"))
+            assert duplicate.success and duplicate.deduplicated
+            assert duplicate.notification_id == request.notification_id
+            assert conflict.error_code == "idempotency_conflict" and conflict.attempts == 0
         assert result.success
         assert result.provider_status == "202"
         assert result.provider_id == "integration-test"
@@ -126,6 +132,9 @@ async def test_cancelled_request_then_shutdown_preserves_real_http_acknowledgeme
         with pytest.raises(asyncio.CancelledError):
             await sending
         assert service.pending_deliveries == 1
+        conflict = await asyncio.wait_for(service.send(replace(request, body="another order")), 1)
+        assert conflict.error_code == "idempotency_conflict"
+        assert conflict.attempts == 0 and conflict.retryable is False
         closing = asyncio.create_task(service.aclose())
         await asyncio.sleep(0)
         assert not closing.done()

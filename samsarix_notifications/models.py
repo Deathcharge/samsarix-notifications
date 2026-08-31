@@ -47,8 +47,10 @@ class NotificationPayload:
     """A validated notification request.
 
     ``max_retries`` is capped to prevent accidental cost amplification. An
-    ``idempotency_key`` deduplicates successful deliveries within one service
-    process and is recommended whenever callers may retry a request.
+    ``idempotency_key`` deduplicates matching successful/in-flight deliveries
+    within one service process. Reusing a retained key with different delivery
+    intent returns an explicit conflict. Direct idempotent metadata supports
+    bounded native values, bytes, and EmailAttachment objects; see the README.
     """
 
     channel: NotificationChannel | str

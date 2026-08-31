@@ -38,6 +38,7 @@ The resulting product decision is an embedded reliability boundary for single-ho
 - Delivery success means the configured transport accepted the message; it does not claim recipient viewing or final provider delivery.
 - Retries occur only for classified transient failures, are exponentially delayed, and are capped. Batch size and transport concurrency are independently bounded; no background retry worker is created.
 - Direct idempotency and result history are bounded and process-local. `SQLiteOutbox` supports same-database transactions, fingerprinted cross-process deduplication, leases fenced by random claim tokens, scheduling, bounded redelivery, corruption quarantine, and explicit dead-letter recovery.
+- Direct idempotency compares typed delivery-intent fingerprints and snapshots accepted keyed payloads, including nested metadata and email attachments. Cached results retain fingerprints rather than message content. ID/timestamp changes and mapping order do not change identity; sequence/scalar types and retry budgets do. Unsupported custom metadata is rejected explicitly for keyed sends, without restricting unkeyed custom-transport requests.
 - `max_messages` defaults to 10,000 retained rows across all outbox states. A conditional insert atomically rejects growth at capacity, including on caller-owned autocommit connections. All writers must use the same configured limit; raw SQL and differently configured applications are outside that guarantee. Delivered-row retention is operator-owned.
 - Outbox/webhook JSON encoding validates depth (32), visited nodes including keys (10,000), integer size (4,096 bits), and text budgets before encoding, then enforces exact encoded-byte limits. JSON keys must be strings; non-finite floats and unsupported objects are rejected.
 - Webhooks require an exact operator host allowlist and default to public HTTPS on port 443, with no redirects, no ambient proxy trust, and DNS/IP checks before every send. Network egress rules remain recommended.
@@ -109,6 +110,12 @@ Validation includes cancelled owners and duplicates, released capacity after que
 - Add provider-specific receipt polling only where an API can support it consistently.
 - Consider redacting or hashing retained recipient identifiers through an opt-in result-store adapter.
 
+### Direct-idempotency follow-up
+
+On baseline `077a94e`, two regressions reproduced incorrect direct-delivery behavior: a key reused for another recipient received the first recipient's cached success, and mutation after admission changed the accepted payload/result. The outbox already rejected intent conflicts, but the direct dispatcher only indexed keys. Parameter consistency is an established retry-contract safeguard, as described in [Stripe's idempotency documentation](https://docs.stripe.com/api/idempotent_requests); this library retains its own success-only, bounded process-local cache semantics rather than adopting Stripe's retention/failure policy.
+
+The fix returns non-retryable, zero-attempt `idempotency_conflict` before waiting or transport I/O, preserving the original operation and cache entry. It hashes type-tagged, length-framed values and snapshots mutable containers at admission. Work is bounded to 32 levels, 10,000 visited values/keys, 4,096-bit integers, and 64 MiB of identity data. Native data and email attachments are supported; arbitrary object hooks, repr-based identity, and pickle are not used. No durable format, database schema, or runtime dependency changes.
+
 ## Implementation checklist
 
 - [x] Define the narrow product and non-goals.
@@ -127,6 +134,7 @@ Validation includes cancelled owners and duplicates, released capacity after que
 - [x] Add a versioned event fixture and exercise the journey from installed wheels in CI.
 - [x] Reproduce and fix direct-delivery task retention, bounded admission, and shutdown ordering.
 - [x] Add unpublished release-candidate validation with an artifact round trip and wheel-only execution of the sdist tests/examples.
+- [x] Reject direct idempotency intent conflicts and isolate admitted keyed payloads from later caller mutation.
 - [ ] Obtain an external consumer pilot and bounded live-provider acceptance evidence (owner-coordinated).
 
 ## Release acceptance criteria
@@ -173,6 +181,10 @@ Environment: fresh `.venv`, Windows, Python 3.14.7. Commands are run through `.v
 
 ## Completed work
 
+### Direct-idempotency verification (2026-08-31)
+
+On Windows/Python 3.14.7, the complete suite passed **203 tests at 95.26% branch-aware coverage**; Ruff formatting/lint, strict mypy (23 files), both isolated localhost examples, and actionlint 1.7.12 also passed. The two baseline failures now pass. New tests cover every compared field in both cached and active states, ID/timestamp regeneration, mapping order, type/framing distinctions, nested snapshot isolation, binary/object attachments through the SMTP interface, real HTTP conflicts after caller cancellation, cache eviction, cleanup, unsupported values, and resource bounds. Exact-head distribution and hosted-CI evidence belongs to the corresponding PR. Durable schema/fingerprint semantics are unchanged.
+
 ### Release-candidate validation (2026-08-31)
 
 CI and release workflows now pin verified Node 24 action releases: checkout 7.0.1, setup-python 7.0.0, upload-artifact 7.0.1, and download-artifact 8.0.1. The previous upload/download comments did not match their pinned runtime; all four replacements were checked against upstream action manifests, not only version labels.
@@ -205,7 +217,7 @@ The repository now has real SMTP and webhook transports; explicit results and st
 - The row cap is not a filesystem-byte quota. SQLite free pages, journals, application tables, and backups use additional space. Purging delivered rows also removes their durable deduplication history; never purge earlier than the business replay window.
 - Notification content and recipient identifiers remain in application memory while being sent; provider privacy terms remain the operator's responsibility.
 - Retries can duplicate an external effect when a provider accepts work but the acknowledgement is lost. Callers should supply idempotency keys and providers should deduplicate when possible.
-- Shutdown grace periods require cooperative transports and a running event loop. Cancelling an SMTP waiter cannot stop a thread already communicating with the provider. Direct idempotency still depends on correct key scoping; different semantic requests must not share a key.
+- Shutdown grace periods require cooperative transports and a running event loop. Cancelling an SMTP waiter cannot stop a thread already communicating with the provider. Direct idempotency rejects conflicting intent only while a key is active or cached; eviction/failure/restart ends that protection. Correct application/tenant key scoping remains a caller responsibility.
 
 ## Distribution and sustainability
 

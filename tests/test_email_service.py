@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import smtplib
+from dataclasses import replace
 from email.message import EmailMessage
 from typing import Any
 
@@ -14,6 +15,7 @@ from samsarix_notifications import (
     EmailService,
     EmailTemplate,
     NotificationPayload,
+    NotificationService,
     NotificationValidationError,
     SMTPConfig,
 )
@@ -109,6 +111,36 @@ async def test_notification_payload_metadata_supplies_html_and_attachments() -> 
     assert not fake.started_tls
     assert fake.login_args is None
     assert any(part.get_filename() == "data.bin" for part in fake.messages[0].walk())
+
+
+@pytest.mark.asyncio
+async def test_idempotent_smtp_dispatch_preserves_attachments_and_rejects_conflicts() -> None:
+    fake = FakeSMTP()
+    email = EmailService(
+        config(start_tls=False, username=None, password=None), smtp_factory=lambda *_: fake
+    )
+    payload = NotificationPayload(
+        "email",
+        "recipient@example.com",
+        "Receipt",
+        "Your receipt is attached.",
+        metadata={
+            "html": "<p>Your receipt is attached.</p>",
+            "attachments": [EmailAttachment("receipt.txt", b"order-456", "text/plain")],
+        },
+        idempotency_key="receipt-456",
+    )
+    async with NotificationService(transports={"email": email}) as service:
+        assert await service.send(payload)
+        assert (await service.send(replace(payload, notification_id="repeated"))).deduplicated
+        conflict = await service.send(replace(payload, recipient="someone-else@example.com"))
+        assert conflict.error_code == "idempotency_conflict"
+        assert len(fake.messages) == 1
+        message = fake.messages[0]
+        assert message["To"] == "recipient@example.com"
+        attachment = next(message.iter_attachments())
+        assert attachment.get_filename() == "receipt.txt"
+        assert attachment.get_payload(decode=True) == b"order-456"
 
 
 @pytest.mark.asyncio
