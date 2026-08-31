@@ -12,6 +12,7 @@ from datetime import datetime
 from functools import partial
 from typing import Any, Protocol
 
+from ._idempotency import snapshot_request
 from .errors import DeliveryError, NotificationError, NotificationValidationError
 from .models import (
     DeliveryResult,
@@ -103,8 +104,9 @@ class NotificationService:
             deque(maxlen=history_limit) if history_limit else None
         )
         self._idempotency_cache_size = idempotency_cache_size
-        self._completed: OrderedDict[str, DeliveryResult] = OrderedDict()
+        self._completed: OrderedDict[str, tuple[bytes, DeliveryResult]] = OrderedDict()
         self._inflight: dict[str, asyncio.Task[DeliveryResult]] = {}
+        self._inflight_fingerprints: dict[str, bytes] = {}
         self._active: set[asyncio.Task[DeliveryResult]] = set()
         self._max_pending_deliveries = max_pending_deliveries
         self._shutdown_timeout_seconds = shutdown_timeout_seconds
@@ -272,15 +274,26 @@ class NotificationService:
                 retryable=False,
             )
         key = payload.idempotency_key if deduplicate and self._idempotency_cache_size else None
+        fingerprint = None
+        if key is not None:
+            try:
+                payload, fingerprint = snapshot_request(payload)
+            except NotificationValidationError as exc:
+                return self._reject_submission(payload, code=exc.code, message=str(exc))
+            key = payload.idempotency_key
         # Admission and task registration contain no await: one event loop owns
         # this service, so duplicate lookup and capacity reservation are atomic.
         if key is not None:
             completed = self._completed.get(key)
             if completed is not None:
+                if completed[0] != fingerprint:
+                    return self._idempotency_conflict(payload)
                 self._completed.move_to_end(key)
-                return replace(completed, deduplicated=True)
+                return replace(completed[1], deduplicated=True)
             task = self._inflight.get(key)
             if task is not None:
+                if self._inflight_fingerprints[key] != fingerprint:
+                    return self._idempotency_conflict(payload)
                 return replace(await asyncio.shield(task), deduplicated=True)
         if len(self._active) >= self._max_pending_deliveries:
             result = self._failure_result(
@@ -297,22 +310,44 @@ class NotificationService:
         self._active.add(task)
         if key is not None:
             self._inflight[key] = task
+            assert fingerprint is not None
+            self._inflight_fingerprints[key] = fingerprint
         # Cleanup belongs to the delivery, not to a possibly cancelled waiter.
         # A done callback also handles cancellation before the coroutine starts.
-        task.add_done_callback(partial(self._delivery_done, key=key))
+        task.add_done_callback(partial(self._delivery_done, key=key, fingerprint=fingerprint))
         if key is not None:
             return await asyncio.shield(task)
         return await task
 
-    def _delivery_done(self, task: asyncio.Task[DeliveryResult], *, key: str | None) -> None:
+    def _idempotency_conflict(self, payload: NotificationPayload) -> DeliveryResult:
+        return self._reject_submission(
+            payload,
+            code="idempotency_conflict",
+            message="Idempotency key was reused for a different notification request",
+        )
+
+    def _reject_submission(
+        self, payload: NotificationPayload, *, code: str, message: str
+    ) -> DeliveryResult:
+        result = self._failure_result(
+            payload, started_at=utc_now(), attempts=0, code=code, message=message, retryable=False
+        )
+        self._record(result)
+        return result
+
+    def _delivery_done(
+        self, task: asyncio.Task[DeliveryResult], *, key: str | None, fingerprint: bytes | None
+    ) -> None:
         self._active.discard(task)
         if key is not None and self._inflight.get(key) is task:
             self._inflight.pop(key)
+            self._inflight_fingerprints.pop(key)
         if task.cancelled() or task.exception() is not None:
             return
         result = task.result()
         if key is not None and result.success:
-            self._completed[key] = result
+            assert fingerprint is not None
+            self._completed[key] = (fingerprint, result)
             self._completed.move_to_end(key)
             while len(self._completed) > self._idempotency_cache_size:
                 self._completed.popitem(last=False)
