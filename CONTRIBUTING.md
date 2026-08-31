@@ -1,5 +1,7 @@
 # Contributing to Samsarix Notifications
 
+Do not commit provider credentials, local environment files, or notification databases. The repository ignores `.env`/`.env.*` (except a placeholder-only `.env.example`) and `.db`/`.sqlite`/`.sqlite3` files plus SQLite sidecars. These rules are a staging safeguard, not access control, encryption, or removal from Git history. Review `git diff --cached` before committing; use synthetic JSON fixtures for tests rather than real notification data.
+
 Thanks for helping improve the package. Contributions should preserve its narrow purpose: a dependable embedded Python delivery boundary for email, webhooks, and custom transports, with optional local SQLite persistence. Hosted infrastructure, managed/distributed databases, user management, and unrelated platform code are out of scope unless the product definition changes explicitly.
 
 ## Setup

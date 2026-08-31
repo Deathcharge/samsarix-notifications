@@ -4,6 +4,7 @@ All notable changes will be documented here. The project follows semantic versio
 
 ## 0.1.0 - Unreleased
 
+- Ignore local provider environment files and SQLite notification databases/sidecars; document the limits of this staging safeguard.
 - Respect bounded webhook `Retry-After` minimums in direct delivery and durable scheduling; expose hints on typed errors and results.
 - Return over-budget direct waits to caller scheduling instead of retrying early; dead-letter unsupported waits without automatic retry.
 - Verify provider deadlines through a real HTTP consumer across worker-process restart and preserve other ready outbox work.

@@ -183,6 +183,25 @@ Environment: fresh `.venv`, Windows, Python 3.14.7. Commands are run through `.v
 
 ## Completed work
 
+### Release-readiness audit and local-data hygiene (2026-08-31)
+
+Audit baseline: clean `main` at `8a1fde7fd51a789411ececf05d69bacbd9bd7326`, synchronized with origin. The preceding turn made concrete progress through merged provider-retry handling; this audit checks the broader objective rather than treating another green increment as proof of production adoption.
+
+| Requirement group | Current authoritative evidence | Disposition |
+| --- | --- | --- |
+| Independent product, target user, and primary journey | README, public API, single HTTPX runtime dependency, transactional order fixture/consumer | Implemented as an embedded Python library, not a hosted platform. |
+| Samsarix identity, attribution, and package license | Manifest, NOTICE, CITATION.cff, SPDX notices, installed-distribution metadata tests | Samsarix LLC, supplied contact addresses, and MPL-2.0 are in place. |
+| Real delivery and ordinary failure recovery | Local HTTP consumer, SMTP interface tests, typed errors, retry/dead-letter/cancellation tests | Locally verified; real SMTP/provider acceptance remains unverified. |
+| Durability, limits, and lifecycle | Transaction/rollback, restart, lease-fencing, backlog, idempotency, retry-hint, and shutdown tests | Covered by the 302-test suite; not exactly-once delivery or a multi-host broker. |
+| Source/artifact and representative compatibility | [Merged-main CI 33391978081](https://github.com/Deathcharge/samsarix-notifications/actions/runs/33391978081), [artifact validation 33391437320](https://github.com/Deathcharge/samsarix-notifications/actions/runs/33391437320), PR #10 hashes/results | Eight CI jobs and no-checkout wheel/sdist verification passed; older Python versions intentionally skip one unavailable eager-task-factory case. |
+| Release controls | Current workflow plus GitHub environment API: owner review required, only `v*` tags allowed, publishing gated on release events | Configured, but registry exchange/publication has not been exercised. |
+| Privacy, cost, and operating guidance | README and outbox guide document plaintext storage, retention/replay, bounded attempts, provider ambiguity, and deployment controls | Documented limits, not an independent audit or production certification. |
+| External distribution and use-case validation | GitHub API returned zero releases; public PyPI project lookup returned 404; no independently owned pilot target or provider acceptance record supplied | Incomplete external gates. A public 404 cannot verify private pending-publisher configuration. |
+
+The audit found an actionable repository-hygiene gap: `.env` variants and normal outbox database names were not ignored. `git check-ignore --no-index` reproduced this without reading or creating sensitive files. Ignore rules now cover local environment files, `.db`/`.sqlite`/`.sqlite3` databases, and their journal/WAL/SHM sidecars; `.env.example` remains shareable for placeholders. Validation passed for 18 ignored paths and six allowed source/template paths, and `git ls-files` found no matching tracked environment/database files. Ignore rules do not remove existing history, encrypt data, protect backups, or prevent force-staging. Contributor and privacy guidance now make those limits explicit.
+
+The unresolved next step is an owner-selected application and test transport, with the acceptance/retention/replay criteria below. Additional adapters, a UI, or synthetic examples cannot supply independent adoption evidence. The full goal remains unproven until the external gates are resolved; the supported disposition is a release candidate.
+
 ### Provider-directed retries (2026-08-31)
 
 On baseline `3fd86ef`, two new regression tests failed: after HTTP 429 with `Retry-After: 60`, direct delivery made four immediate attempts and a zero-backoff worker claimed the same row three times in one run. This exhausted local budgets while ignoring a provider minimum. [RFC 9110 section 10.2.3](https://www.rfc-editor.org/rfc/rfc9110.html#section-10.2.3) defines integer-second/date hints, and [Slack documents HTTP 429 plus Retry-After](https://docs.slack.dev/apis/web-api/rate-limits/) for rate-limited HTTP APIs, including incoming webhooks. These sources establish a concrete interoperability need, not evidence of Samsarix customer demand or a new built-in Slack adapter.
