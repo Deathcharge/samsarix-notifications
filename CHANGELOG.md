@@ -4,6 +4,10 @@ All notable changes will be documented here. The project follows semantic versio
 
 ## 0.1.0 - Unreleased
 
+- Own direct-delivery task cleanup independently of cancelled callers, retaining successful idempotency results without leaking finished tasks.
+- Add bounded pending-delivery admission, a public pending count, and retryable zero-attempt backpressure.
+- Drain accepted sends before shared transport shutdown, with configurable grace periods and explicit timeout/cleanup errors.
+- Verify cancellation-to-provider-acceptance over real localhost HTTP and exercise cooperative shutdown, concurrent close, queued cancellation, and eager task factories.
 - Bound retained outbox rows with atomic capacity backpressure and preserve application rollback at capacity.
 - Validate JSON complexity and size before serialization for outbox and webhook payloads; quarantine deeply malformed stored JSON.
 - Verify a versioned order-confirmation consumer over real loopback HTTP across worker-process restarts, including from installed wheels in CI.

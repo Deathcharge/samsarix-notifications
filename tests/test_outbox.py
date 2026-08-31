@@ -720,3 +720,43 @@ async def test_deep_corrupt_json_is_quarantined_without_aborting_worker(tmp_path
     worker = OutboxWorker(store, NotificationService(transports={"test": transport}))
     assert (await worker.run_once()).dead_lettered == 1
     assert transport.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_busy_service_reschedules_claim_without_a_provider_call(tmp_path: Path) -> None:
+    class BusyTransport:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.calls = 0
+
+        async def send(self, _payload: NotificationPayload) -> TransportResult:
+            self.calls += 1
+            self.started.set()
+            await self.release.wait()
+            return TransportResult(provider_status="accepted")
+
+    transport = BusyTransport()
+    service = NotificationService(transports={"test": transport}, max_pending_deliveries=1)
+    sending = asyncio.create_task(service.send(payload(notification_id="direct")))
+    await asyncio.wait_for(transport.started.wait(), 1)
+    store = outbox(tmp_path)
+    store.enqueue(payload())
+    worker = OutboxWorker(
+        store,
+        service,
+        max_delivery_attempts=2,
+        base_delay_seconds=0,
+        max_delay_seconds=0,
+    )
+    first = await worker.run_once(limit=1)
+    pending = store.get("notification-1")
+    assert first.claimed == first.rescheduled == 1
+    assert pending is not None and pending.last_error_code == "service_busy"
+    assert pending.attempt_count == 1
+    assert transport.calls == 1  # Only the direct send contacted the provider.
+    transport.release.set()
+    assert await asyncio.wait_for(sending, 1)
+    assert (await worker.run_once(limit=1)).delivered == 1
+    assert transport.calls == 2
+    await service.aclose()
