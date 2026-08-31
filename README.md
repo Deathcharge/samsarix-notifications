@@ -287,6 +287,8 @@ The library does not add telemetry, analytics, or a cloud service. Direct delive
 
 The optional SQLite outbox necessarily stores recipients, subjects, bodies, JSON metadata, and provider receipts in plaintext. Place its database under appropriate filesystem permissions, backup, retention, disk-encryption, and privacy controls. Do not store credentials in notification metadata.
 
+Repository ignore rules exclude local `.env` files and `.db`/`.sqlite`/`.sqlite3` databases with their journal/WAL/SHM sidecars. An explicit `.env.example` is allowed for placeholders only; the library does not load dotenv files. Git ignore rules do not protect already tracked files, backups, logs, or files staged with `--force`. Review staged changes before sharing, and keep production data outside the source checkout.
+
 Provider cost is controlled by the caller's provider contract. Conservative upper bounds are:
 
 ```text
