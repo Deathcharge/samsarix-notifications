@@ -151,7 +151,7 @@ Counts, capacities, byte limits, ports, and retry numbers require native Python 
 
 Numeric strings, booleans used as numbers, fractional counts, `NaN`, infinity, and custom numeric objects are rejected; configuration mappings follow the same rules as keyword arguments. Parse environment variables explicitly (`int(...)` for counts/ports, `float(...)` for durations, and an explicit accepted-values parser for boolean flags). Do not use `bool("false")`, which is `True` in Python. Earlier pre-release dispatcher mappings silently converted some counts; that coercion is no longer supported.
 
-Invalid transport settings raise `ConfigurationError` (`invalid_configuration`); invalid dispatcher, retry, alert, or outbox limits raise `NotificationValidationError` (`invalid_input`). These numeric/boolean checks run at construction or operation entry, before transport attempts or database access. Existing bounds and defaults are unchanged: zero retries, zero retained history/cache, and zero retry delays remain available where supported. `RetryPolicy.delay_before_retry()` takes an integer retry number from 1 to 10.
+Invalid numeric/boolean transport settings raise `ConfigurationError` (`invalid_configuration`); invalid dispatcher, retry, alert, or outbox limits raise `NotificationValidationError` (`invalid_input`). These numeric/boolean checks run at construction or operation entry, before transport attempts or database access. Existing bounds and defaults are unchanged: zero retries, zero retained history/cache, and zero retry delays remain available where supported. `RetryPolicy.delay_before_retry()` takes an integer retry number from 1 to 10.
 
 ## Delivery semantics
 
